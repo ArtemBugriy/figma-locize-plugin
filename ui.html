@@ -1,17 +1,309 @@
-<h2>Shape Creator</h2>
-<p>Count: <input id="count" type="number" value="5"></p>
-<button id="create">Create</button>
-<button id="cancel">Cancel</button>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Locize Integration</title>
+<style>
+  body { font: 12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 12px; }
+  h2 { margin: 8px 0 4px; font-size: 14px; }
+  fieldset { border: 1px solid #ccc; padding: 8px 10px 10px; margin-bottom: 10px; }
+  legend { padding: 0 4px; font-weight: 600; }
+  label { display: flex; flex-direction: column; font-size: 11px; gap: 2px; margin-bottom: 6px; }
+  input[type=text], input[type=password], select { padding: 4px 6px; font-size: 12px; }
+  input.key-input { width: 220px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  th, td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
+  th { background: #f5f5f5; position: sticky; top: 0; }
+  tbody tr.new td { background: #f0fff4; }
+  tbody tr.existing td { background: #f7f7ff; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { cursor: pointer; padding: 6px 10px; font-size: 12px; }
+  .row-flex { display: flex; gap: 8px; }
+  .small { font-size: 10px; color: #666; }
+  .status { margin-top: 6px; min-height: 16px; font-size: 11px; white-space: pre-line; }
+  .lang-badge { background:#eee; padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; }
+  .flex { display: flex; }
+  .gap { gap: 8px; }
+  .grow { flex: 1; }
+  .nowrap { white-space: nowrap; }
+  #keys-container { max-height: 220px; overflow: auto; border:1px solid #ccc; }
+  #uploadProgress { width: 100%; height: 4px; background: #eee; margin-top:4px; position: relative; }
+  #uploadProgress span { position:absolute; top:0; left:0; height:100%; background:#4a8cff; width:0%; transition: width .2s; }
+</style>
+</head>
+<body>
+  <fieldset>
+    <legend>Настройки</legend>
+    <div class="row-flex" style="align-items:flex-end; flex-wrap:wrap;">
+      <label class="grow">Project ID<input id="projectId" type="text" placeholder="project id" /></label>
+      <label class="grow">API Key (write)<input id="apiKey" type="password" placeholder="write api key" /></label>
+      <label>Version<input id="version" type="text" value="latest" /></label>
+      <label>Base Lang<input id="baseLanguage" type="text" value="en" /></label>
+      <label>Namespace<input id="defaultNamespace" type="text" value="common" /></label>
+      <button id="saveSettings" style="height:32px;">Сохранить</button>
+    </div>
+    <div class="small">Данные локально сохраняются в clientStorage плагина.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Работа с ключами</legend>
+    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
+      <label>Namespace для скана<input id="scanNamespace" type="text" placeholder="common" /></label>
+      <button id="scanSelection">Сканировать выделение</button>
+      <button id="refreshAssigned">Показать назначенные</button>
+    </div>
+    <div class="small">Генерация ключей выполняется на основе иерархии и названия слоя / текста.</div>
+    <div id="keys-container">
+      <table id="keysTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="selectAll" /></th>
+            <th>Ключ</th>
+            <th>Текст</th>
+            <th>Слой</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="actions" style="margin-top:6px;">
+      <button id="applyKeys" disabled>Применить ключи к нодам</button>
+      <button id="uploadKeys" disabled>Выгрузить в locize (base)</button>
+    </div>
+    <div id="uploadProgress"><span></span></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Переключение языка</legend>
+    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
+      <label>Язык<select id="languageSelect"></select></label>
+      <label>Namespace<input id="langNamespace" type="text" value="common" /></label>
+      <button id="loadLanguage">Загрузить и применить</button>
+    </div>
+    <div class="small">Загружает переводы и применяет на ноды с назначенными ключами.</div>
+  </fieldset>
+
+  <div class="status" id="status"></div>
+
 <script>
+const els = {
+  projectId: document.getElementById('projectId'),
+  apiKey: document.getElementById('apiKey'),
+  version: document.getElementById('version'),
+  baseLanguage: document.getElementById('baseLanguage'),
+  defaultNamespace: document.getElementById('defaultNamespace'),
+  scanNamespace: document.getElementById('scanNamespace'),
+  saveSettings: document.getElementById('saveSettings'),
+  scanSelection: document.getElementById('scanSelection'),
+  refreshAssigned: document.getElementById('refreshAssigned'),
+  applyKeys: document.getElementById('applyKeys'),
+  uploadKeys: document.getElementById('uploadKeys'),
+  status: document.getElementById('status'),
+  tableBody: document.querySelector('#keysTable tbody'),
+  selectAll: document.getElementById('selectAll'),
+  languageSelect: document.getElementById('languageSelect'),
+  loadLanguage: document.getElementById('loadLanguage'),
+  langNamespace: document.getElementById('langNamespace'),
+  uploadProgress: document.querySelector('#uploadProgress span'),
+};
 
-document.getElementById('create').onclick = () => {
-  const textbox = document.getElementById('count');
-  const count = parseInt(textbox.value, 10);
-  parent.postMessage({ pluginMessage: { type: 'create-shapes', count } }, '*')
+let currentItems = []; // {nodeId,name,text,key,existing, selected}
+let settingsLoaded = false;
+
+function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
+
+function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
+
+function renderTable(){
+  els.tableBody.innerHTML = '';
+  currentItems.forEach((item, idx) => {
+    const tr = document.createElement('tr');
+    tr.className = item.existing ? 'existing' : 'new';
+
+    const tdSel = document.createElement('td');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = item.selected !== false; // default selected
+    cb.addEventListener('change', () => { item.selected = cb.checked; updateButtons(); });
+    tdSel.appendChild(cb);
+
+    const tdKey = document.createElement('td');
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = item.key;
+    inp.className = 'key-input';
+    inp.addEventListener('input', () => { item.key = inp.value.trim(); });
+    tdKey.appendChild(inp);
+
+    const tdText = document.createElement('td');
+    tdText.textContent = item.text;
+
+    const tdName = document.createElement('td');
+    tdName.textContent = item.name;
+
+    const tdStatus = document.createElement('td');
+    tdStatus.textContent = item.existing ? 'есть' : 'новый';
+
+    tr.appendChild(tdSel); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdName); tr.appendChild(tdStatus);
+    els.tableBody.appendChild(tr);
+  });
+  updateButtons();
 }
 
-document.getElementById('cancel').onclick = () => {
-  parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
+function updateButtons(){
+  const anySelected = currentItems.some(i => i.selected !== false);
+  els.applyKeys.disabled = !anySelected;
+  els.uploadKeys.disabled = !anySelected;
 }
 
+// Settings load
+pm({ type: 'load-settings' });
+
+els.saveSettings.addEventListener('click', () => {
+  pm({ type: 'save-settings', settings: collectSettings() });
+  if(!els.scanNamespace.value) els.scanNamespace.value = els.defaultNamespace.value || 'common';
+  if(!els.langNamespace.value) els.langNamespace.value = els.defaultNamespace.value || 'common';
+  fetchLanguagesList();
+});
+
+function collectSettings(){
+  return {
+    projectId: els.projectId.value.trim(),
+    apiKey: els.apiKey.value.trim(),
+    version: els.version.value.trim() || 'latest',
+    baseLanguage: els.baseLanguage.value.trim() || 'en',
+    defaultNamespace: els.defaultNamespace.value.trim() || 'common'
+  };
+}
+
+els.scanSelection.addEventListener('click', () => {
+  const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
+  pm({ type: 'scan-selection', namespace: ns });
+});
+
+els.refreshAssigned.addEventListener('click', () => {
+  pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
+});
+
+els.applyKeys.addEventListener('click', () => {
+  const items = currentItems.filter(i => i.selected !== false).map(i => ({ ...i }));
+  pm({ type: 'apply-keys', items });
+});
+
+els.uploadKeys.addEventListener('click', async () => {
+  const sel = currentItems.filter(i => i.selected !== false);
+  if(!sel.length) return;
+  const s = collectSettings();
+  if(!validateSettings(s)) return;
+  const namespace = (els.scanNamespace.value || s.defaultNamespace).trim();
+  await uploadSelectedKeys(sel, s, namespace);
+});
+
+els.selectAll.addEventListener('change', () => {
+  currentItems.forEach(i => i.selected = els.selectAll.checked);
+  renderTable();
+});
+
+els.loadLanguage.addEventListener('click', async () => {
+  const s = collectSettings(); if(!validateSettings(s)) return;
+  const lang = els.languageSelect.value; if(!lang) { setStatus('Выберите язык'); return; }
+  const ns = (els.langNamespace.value || s.defaultNamespace || 'common').trim();
+  try {
+    setStatus('Загрузка переводов...', false);
+    const translations = await fetchTranslations(s, lang, ns);
+    pm({ type: 'apply-language', map: translations, namespace: ns });
+    setStatus('Применено');
+  } catch(e){ setStatus('Ошибка загрузки: ' + e.message); }
+});
+
+function validateSettings(s){
+  if(!s.projectId || !s.apiKey){ setStatus('ProjectId и ApiKey обязательны'); return false; }
+  return true;
+}
+
+async function fetchLanguagesList(){
+  const s = collectSettings(); if(!s.projectId) return;
+  try {
+    const res = await fetch(`https://api.locize.io/languages/${s.projectId}`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    const langs = Object.keys(data);
+    els.languageSelect.innerHTML = langs.map(l => `<option value="${l}">${l}</option>`).join('');
+    if(s.baseLanguage && !els.languageSelect.value) els.languageSelect.value = s.baseLanguage;
+  } catch(e){ setStatus('Не удалось загрузить языки: '+ e.message); }
+}
+
+async function fetchTranslations(s, language, namespace){
+  const url = `https://api.locize.io/${s.projectId}/${s.version}/${language}/${namespace}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function uploadSelectedKeys(items, s, namespace){
+  const baseLang = s.baseLanguage || 'en';
+  let done = 0; const total = items.length;
+  setStatus('Выгрузка ключей...');
+  setProgress(0);
+  for(const it of items){
+    try {
+      const { key, text } = it;
+      const shortKey = key.startsWith(namespace + '.') ? key.slice(namespace.length + 1) : key;
+      await putTranslation(s, baseLang, namespace, shortKey, text);
+      done++;
+      setProgress(done/total*100);
+      setStatus(`(${done}/${total}) ${shortKey} OK`, true);
+    } catch(e){
+      setStatus('Ошибка для '+ it.key +': '+ e.message, true);
+    }
+  }
+  setStatus('Готово. Загружено: '+done+'/'+total, true);
+}
+
+function setProgress(pct){ els.uploadProgress.style.width = pct.toFixed(1)+'%'; }
+
+async function putTranslation(s, language, namespace, key, value){
+  const url = `https://api.locize.io/${s.projectId}/${s.version}/${language}/${namespace}/${encodeURIComponent(key)}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type':'application/json', 'Authorization': s.apiKey },
+    body: JSON.stringify({ value })
+  });
+  if(!res.ok){ throw new Error('HTTP '+res.status); }
+  return res.json();
+}
+
+window.onmessage = (event) => {
+  const msg = event.data.pluginMessage;
+  if(!msg) return;
+  switch(msg.type){
+    case 'settings-loaded': {
+      const s = msg.settings;
+      els.projectId.value = s.projectId || '';
+      els.apiKey.value = s.apiKey || '';
+      els.version.value = s.version || 'latest';
+      els.baseLanguage.value = s.baseLanguage || 'en';
+      els.defaultNamespace.value = s.defaultNamespace || 'common';
+      if(!els.scanNamespace.value) els.scanNamespace.value = s.defaultNamespace || 'common';
+      if(!els.langNamespace.value) els.langNamespace.value = s.defaultNamespace || 'common';
+      settingsLoaded = true;
+      fetchLanguagesList();
+      break;
+    }
+    case 'scan-result': {
+      if(msg.warning) setStatus(msg.warning);
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: true }));
+      renderTable();
+      break;
+    }
+    case 'assigned-result': {
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: true }));
+      renderTable();
+      break;
+    }
+  }
+};
 </script>
+</body>
+</html>

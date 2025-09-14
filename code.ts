@@ -3,126 +3,209 @@
 // You can access browser APIs in the <script> tag inside "ui.html" which has a
 // full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
 
-// Runs this code if the plugin is run in Figma
-if (figma.editorType === 'figma') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many rectangles on the screen.
+// Locize integration plugin main code
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
-
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates rectangles on the screen.
-      const numberOfRectangles = msg.count;
-
-      const nodes: SceneNode[] = [];
-      for (let i = 0; i < numberOfRectangles; i++) {
-        const rect = figma.createRectangle();
-        rect.x = i * 150;
-        rect.fills = [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0 } }];
-        figma.currentPage.appendChild(rect);
-        nodes.push(rect);
-      }
-      figma.currentPage.selection = nodes;
-      figma.viewport.scrollAndZoomIntoView(nodes);
-    }
-
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+interface Settings {
+  projectId: string;
+  apiKey: string; // write key
+  version: string; // e.g. 'latest' or environment version
+  defaultNamespace: string;
+  baseLanguage: string;
 }
 
-// Runs this code if the plugin is run in FigJam
-if (figma.editorType === 'figjam') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many shapes and connectors on the screen.
-
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
-
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates shapes and connectors on the screen.
-      const numberOfShapes = msg.count;
-
-      const nodes: SceneNode[] = [];
-      for (let i = 0; i < numberOfShapes; i++) {
-        const shape = figma.createShapeWithText();
-        // You can set shapeType to one of: 'SQUARE' | 'ELLIPSE' | 'ROUNDED_RECTANGLE' | 'DIAMOND' | 'TRIANGLE_UP' | 'TRIANGLE_DOWN' | 'PARALLELOGRAM_RIGHT' | 'PARALLELOGRAM_LEFT'
-        shape.shapeType = 'ROUNDED_RECTANGLE';
-        shape.x = i * (shape.width + 200);
-        shape.fills = [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0 } }];
-        figma.currentPage.appendChild(shape);
-        nodes.push(shape);
-      }
-
-      for (let i = 0; i < numberOfShapes - 1; i++) {
-        const connector = figma.createConnector();
-        connector.strokeWeight = 8;
-
-        connector.connectorStart = {
-          endpointNodeId: nodes[i].id,
-          magnet: 'AUTO',
-        };
-
-        connector.connectorEnd = {
-          endpointNodeId: nodes[i + 1].id,
-          magnet: 'AUTO',
-        };
-      }
-
-      figma.currentPage.selection = nodes;
-      figma.viewport.scrollAndZoomIntoView(nodes);
-    }
-
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+interface ScanItem {
+  nodeId: string;
+  name: string;
+  text: string;
+  key: string;
+  existing: boolean;
 }
 
-// Runs this code if the plugin is run in Slides
-if (figma.editorType === 'slides') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many slides on the screen.
+interface TranslationMap { [key: string]: string; }
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
+const PLUGIN_KEY_KEY = 'locize:key';
 
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates slides and puts the user in grid view.
-      const numberOfSlides = msg.count;
-
-      const nodes: SlideNode[] = [];
-      for (let i = 0; i < numberOfSlides; i++) {
-        const slide = figma.createSlide();
-        nodes.push(slide);
-      }
-
-      figma.viewport.slidesView = 'grid';
-      figma.currentPage.selection = nodes;
-    }
-
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+function slugify(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9\s-_]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
 }
+
+function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
+  const result: TextNode[] = [];
+  function traverse(node: SceneNode) {
+    if ('type' in node) {
+      if (node.type === 'TEXT') {
+        result.push(node as TextNode);
+      } else if ('children' in node) {
+        for (const child of (node as ChildrenMixin).children) traverse(child as SceneNode);
+      }
+    }
+  }
+  nodes.forEach(n => traverse(n));
+  return result;
+}
+
+function buildHierarchyPath(node: SceneNode): string[] {
+  const path: string[] = [];
+  let current: BaseNode | null = node;
+  while (current && current.type !== 'PAGE') {
+    if ('name' in current) path.unshift(current.name);
+    current = current.parent as BaseNode | null;
+  }
+  return path;
+}
+
+function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
+  const used = new Set<string>();
+  const items: ScanItem[] = [];
+  for (const node of textNodes) {
+    const existingKey = node.getPluginData(PLUGIN_KEY_KEY);
+    let key: string;
+    if (existingKey) {
+      key = existingKey;
+      used.add(key);
+    } else {
+      const pathParts = buildHierarchyPath(node).slice(-3); // last 3 levels
+      const baseName = node.name && !/^text/i.test(node.name) ? node.name : node.characters.slice(0, 30);
+      const raw = [...pathParts, baseName].join('_');
+      let candidate = slugify(raw);
+      if (!candidate) candidate = 'text';
+      let finalKey = candidate;
+      let i = 1;
+      while (used.has(finalKey)) {
+        i += 1;
+        finalKey = `${candidate}_${i}`;
+      }
+      key = finalKey;
+      used.add(key);
+    }
+    items.push({
+      nodeId: node.id,
+      name: node.name,
+      text: node.characters,
+      key: key.startsWith(namespace + '.') ? key : `${namespace}.${key}`,
+      existing: !!existingKey,
+    });
+  }
+  return items;
+}
+
+async function ensureFonts(nodes: TextNode[]) {
+  const promises: Promise<void>[] = [];
+  const loaded = new Set<string>();
+  for (const n of nodes) {
+    const fontName = n.fontName;
+    if (fontName === figma.mixed) continue;
+    const key = `${(fontName as FontName).family}__${(fontName as FontName).style}`;
+    if (!loaded.has(key)) {
+      loaded.add(key);
+      promises.push(figma.loadFontAsync(fontName as FontName));
+    }
+  }
+  await Promise.all(promises);
+}
+
+async function applyTranslations(map: TranslationMap, namespace: string) {
+  const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
+  const allNodes: TextNode[] = collectTextNodes(sourceNodes);
+  const targetNodes = allNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY));
+  await ensureFonts(targetNodes);
+  for (const n of targetNodes) {
+    const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
+    if (!fullKey) continue;
+    if (map[fullKey] !== undefined) {
+      n.characters = map[fullKey];
+    } else if (fullKey.startsWith(namespace + '.')) {
+      const shortKey = fullKey.replace(namespace + '.', '');
+      if (map[shortKey] !== undefined) {
+        n.characters = map[shortKey];
+      }
+    }
+  }
+}
+
+figma.showUI(__html__, { width: 620, height: 640 });
+
+figma.ui.onmessage = async (msg) => {
+  switch (msg.type) {
+    case 'load-settings': {
+      const settings: Settings = {
+        projectId: (await figma.clientStorage.getAsync('locize.projectId')) || '',
+        apiKey: (await figma.clientStorage.getAsync('locize.apiKey')) || '',
+        version: (await figma.clientStorage.getAsync('locize.version')) || 'latest',
+        defaultNamespace: (await figma.clientStorage.getAsync('locize.defaultNamespace')) || 'common',
+        baseLanguage: (await figma.clientStorage.getAsync('locize.baseLanguage')) || 'en',
+      };
+      figma.ui.postMessage({ type: 'settings-loaded', settings });
+      break;
+    }
+    case 'save-settings': {
+      const s: Settings = msg.settings;
+      await figma.clientStorage.setAsync('locize.projectId', s.projectId);
+      await figma.clientStorage.setAsync('locize.apiKey', s.apiKey);
+      await figma.clientStorage.setAsync('locize.version', s.version);
+      await figma.clientStorage.setAsync('locize.defaultNamespace', s.defaultNamespace);
+      await figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage);
+      figma.notify('Настройки сохранены');
+      break;
+    }
+    case 'scan-selection': {
+      const namespace: string = msg.namespace || 'common';
+      const selection = figma.currentPage.selection;
+      if (!selection.length) {
+        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'Нет выделения' });
+        break;
+      }
+      const textNodes = collectTextNodes(selection as readonly SceneNode[]);
+      if (!textNodes.length) {
+        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'Текстовые ноды не найдены' });
+        break;
+      }
+      const items = generateKeys(textNodes, namespace);
+      figma.ui.postMessage({ type: 'scan-result', items });
+      break;
+    }
+    case 'apply-keys': {
+      const items: ScanItem[] = msg.items;
+      for (const item of items) {
+        const node = await figma.getNodeByIdAsync(item.nodeId);
+        if (node && node.type === 'TEXT') {
+          (node as TextNode).setPluginData(PLUGIN_KEY_KEY, item.key);
+        }
+      }
+      figma.notify('Ключи сохранены в нодах');
+      break;
+    }
+    case 'apply-language': {
+      const map: TranslationMap = msg.map;
+      const namespace: string = msg.namespace;
+      await applyTranslations(map, namespace);
+      figma.notify('Применён язык');
+      break;
+    }
+    case 'get-assigned': {
+      const namespace: string = msg.namespace || '';
+      const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
+      const textNodes = collectTextNodes(sourceNodes);
+      const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => ({
+        nodeId: n.id,
+        name: n.name,
+        text: n.characters,
+        key: n.getPluginData(PLUGIN_KEY_KEY),
+        existing: true,
+      })).filter(i => !namespace || i.key.startsWith(namespace + '.'));
+      figma.ui.postMessage({ type: 'assigned-result', items });
+      break;
+    }
+    case 'close': {
+      figma.closePlugin();
+      break;
+    }
+  }
+};
