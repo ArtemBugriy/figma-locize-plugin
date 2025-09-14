@@ -15,10 +15,12 @@ interface Settings {
 
 interface ScanItem {
   nodeId: string;
-  name: string; // текущее имя (может стать ключом)
-  originalName: string; // исходное имя до замены
+  name: string;
+  originalName: string;
   text: string;
-  key: string;
+  key: string; // полный ключ namespace.local
+  namespace: string; // namespace
+  localKey: string; // часть без namespace
   existing: boolean;
 }
 
@@ -72,7 +74,7 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
     let key: string;
     if (existingKey) {
       key = existingKey;
-      used.add(key);
+      used.add(key.split('.').slice(-1)[0]);
     } else {
       const pathParts = buildHierarchyPath(node).slice(-3);
       const baseName = node.name && !/^text/i.test(node.name) ? node.name : node.characters.slice(0, 30);
@@ -85,15 +87,20 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
         i += 1;
         finalKey = `${candidate}_${i}`;
       }
-      key = finalKey;
-      used.add(key);
+      key = `${namespace}.${finalKey}`;
+      used.add(finalKey);
     }
+    const dotIndex = key.indexOf('.');
+    const ns = dotIndex > -1 ? key.slice(0, dotIndex) : '';
+    const local = dotIndex > -1 ? key.slice(dotIndex + 1) : key;
     items.push({
       nodeId: node.id,
       name: node.name,
       originalName: storedOriginal || node.name,
       text: node.characters,
-      key: key.startsWith(namespace + '.') ? key : `${namespace}.${key}`,
+      key,
+      namespace: ns,
+      localKey: local,
       existing: !!existingKey,
     });
   }
@@ -214,14 +221,22 @@ figma.ui.onmessage = async (msg) => {
       const namespace: string = msg.namespace || '';
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
-      const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => ({
-        nodeId: n.id,
-        name: n.name,
-        originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
-        text: n.characters,
-        key: n.getPluginData(PLUGIN_KEY_KEY),
-        existing: true,
-      })).filter(i => !namespace || i.key.startsWith(namespace + '.'));
+      const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
+        const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
+        const dotIndex = fullKey.indexOf('.');
+        const ns = dotIndex > -1 ? fullKey.slice(0, dotIndex) : '';
+        const local = dotIndex > -1 ? fullKey.slice(dotIndex + 1) : fullKey;
+        return {
+          nodeId: n.id,
+            name: n.name,
+            originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
+            text: n.characters,
+            key: fullKey,
+            namespace: ns,
+            localKey: local,
+            existing: true,
+        };
+      }).filter(i => !namespace || i.key.startsWith(namespace + '.'));
       figma.ui.postMessage({ type: 'assigned-result', items });
       break;
     }
@@ -242,14 +257,22 @@ figma.ui.onmessage = async (msg) => {
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
       const namespace = '';
-      const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => ({
-        nodeId: n.id,
-        name: n.name,
-        originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
-        text: n.characters,
-        key: n.getPluginData(PLUGIN_KEY_KEY),
-        existing: true,
-      }));
+      const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
+        const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
+        const dotIndex = fullKey.indexOf('.');
+        const ns = dotIndex > -1 ? fullKey.slice(0, dotIndex) : '';
+        const local = dotIndex > -1 ? fullKey.slice(dotIndex + 1) : fullKey;
+        return {
+          nodeId: n.id,
+          name: n.name,
+          originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
+          text: n.characters,
+          key: fullKey,
+          namespace: ns,
+          localKey: local,
+          existing: true,
+        };
+      });
       figma.ui.postMessage({ type: 'assigned-result', items: itemsOut });
       break;
     }

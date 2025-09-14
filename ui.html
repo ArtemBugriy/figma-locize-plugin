@@ -58,9 +58,10 @@
         <thead>
           <tr>
             <th><input type="checkbox" id="selectAll" /></th>
-            <th>Ключ</th>
+            <th>Namespace</th>
+            <th>Key</th>
             <th>Текст</th>
-            <th>Оригинальное имя ноды</th>
+            <th>Оригинальное имя</th>
             <th>Статус</th>
           </tr>
         </thead>
@@ -119,24 +120,38 @@ function setStatus(msg, append=false){ if(!append) els.status.textContent=''; el
 
 function renderTable(){
   els.tableBody.innerHTML = '';
-  currentItems.forEach((item, idx) => {
+  const nsSet = Array.from(new Set(currentItems.map(i => i.namespace).filter(Boolean))).sort();
+  currentItems.forEach((item) => {
+    // fallback если пришло только key
+    if(!item.namespace || !item.localKey){
+      const dot = (item.key||'').indexOf('.');
+      if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
+    }
     const tr = document.createElement('tr');
     tr.className = item.existing ? 'existing' : 'new';
 
     const tdSel = document.createElement('td');
     const cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.checked = item.selected !== false; // default selected
+    cb.checked = item.selected !== false;
     cb.addEventListener('change', () => { item.selected = cb.checked; updateButtons(); });
     tdSel.appendChild(cb);
 
+    const tdNs = document.createElement('td');
+    const nsInput = document.createElement('input');
+    nsInput.type = 'text';
+    nsInput.value = item.namespace || '';
+    nsInput.style.width = '90px';
+    nsInput.addEventListener('input', () => { item.namespace = nsInput.value.trim(); recomputeKey(item); });
+    tdNs.appendChild(nsInput);
+
     const tdKey = document.createElement('td');
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.value = item.key;
-    inp.className = 'key-input';
-    inp.addEventListener('input', () => { item.key = inp.value.trim(); });
-    tdKey.appendChild(inp);
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.value = item.localKey || '';
+    keyInput.className = 'key-input';
+    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); });
+    tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
     tdText.textContent = item.text;
@@ -147,10 +162,16 @@ function renderTable(){
     const tdStatus = document.createElement('td');
     tdStatus.textContent = item.existing ? 'есть' : 'новый';
 
-    tr.appendChild(tdSel); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
+    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
   });
   updateButtons();
+}
+
+function recomputeKey(item){
+  const ns = (item.namespace||'').trim();
+  const lk = (item.localKey||'').trim();
+  item.key = ns ? `${ns}.${lk}` : lk;
 }
 
 function updateButtons(){
@@ -202,8 +223,7 @@ els.uploadKeys.addEventListener('click', async () => {
   if(!sel.length) return;
   const s = collectSettings();
   if(!validateSettings(s)) return;
-  const namespace = (els.scanNamespace.value || s.defaultNamespace).trim();
-  await uploadSelectedKeys(sel, s, namespace);
+  await uploadSelectedKeys(sel, s);
 });
 
 els.selectAll.addEventListener('change', () => {
@@ -255,21 +275,22 @@ async function fetchTranslations(s, language, namespace){
   return res.json();
 }
 
-async function uploadSelectedKeys(items, s, namespace){
+async function uploadSelectedKeys(items, s){
   const baseLang = s.baseLanguage || 'en';
   let done = 0; const total = items.length;
   setStatus('Выгрузка ключей...');
   setProgress(0);
   for(const it of items){
     try {
-      const { key, text } = it;
-      const shortKey = key.startsWith(namespace + '.') ? key.slice(namespace.length + 1) : key;
-      await putTranslation(s, baseLang, namespace, shortKey, text);
+      const ns = it.namespace || (s.defaultNamespace || 'common');
+      const local = it.localKey || it.key.replace(/^.*\./,'');
+      if(!ns || !local){ throw new Error('namespace/localKey пустые'); }
+      await putTranslation(s, baseLang, ns, local, it.text);
       done++;
       setProgress(done/total*100);
-      setStatus(`(${done}/${total}) ${shortKey} OK`, true);
+      setStatus(`(${done}/${total}) ${ns}.${local} OK`, true);
     } catch(e){
-      setStatus('Ошибка для '+ it.key +': '+ e.message, true);
+      setStatus('Ошибка для '+ (it.key||'?') +': '+ e.message, true);
     }
   }
   setStatus('Готово. Загружено: '+done+'/'+total, true);
