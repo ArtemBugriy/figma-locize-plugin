@@ -15,7 +15,8 @@ interface Settings {
 
 interface ScanItem {
   nodeId: string;
-  name: string;
+  name: string; // текущее имя (может стать ключом)
+  originalName: string; // исходное имя до замены
   text: string;
   key: string;
   existing: boolean;
@@ -24,6 +25,7 @@ interface ScanItem {
 interface TranslationMap { [key: string]: string; }
 
 const PLUGIN_KEY_KEY = 'locize:key';
+const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
 
 function slugify(str: string): string {
   return str
@@ -66,12 +68,13 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
   const items: ScanItem[] = [];
   for (const node of textNodes) {
     const existingKey = node.getPluginData(PLUGIN_KEY_KEY);
+    const storedOriginal = node.getPluginData(PLUGIN_ORIG_NAME_KEY);
     let key: string;
     if (existingKey) {
       key = existingKey;
       used.add(key);
     } else {
-      const pathParts = buildHierarchyPath(node).slice(-3); // last 3 levels
+      const pathParts = buildHierarchyPath(node).slice(-3);
       const baseName = node.name && !/^text/i.test(node.name) ? node.name : node.characters.slice(0, 30);
       const raw = [...pathParts, baseName].join('_');
       let candidate = slugify(raw);
@@ -88,6 +91,7 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
     items.push({
       nodeId: node.id,
       name: node.name,
+      originalName: storedOriginal || node.name,
       text: node.characters,
       key: key.startsWith(namespace + '.') ? key : `${namespace}.${key}`,
       existing: !!existingKey,
@@ -185,10 +189,18 @@ figma.ui.onmessage = async (msg) => {
       for (const item of items) {
         const node = await figma.getNodeByIdAsync(item.nodeId);
         if (node && node.type === 'TEXT') {
-          (node as TextNode).setPluginData(PLUGIN_KEY_KEY, item.key);
+          const textNode = node as TextNode;
+            // сохранить ключ
+          textNode.setPluginData(PLUGIN_KEY_KEY, item.key);
+          // сохранить оригинальное имя, если ещё не сохранено
+          if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
+            textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
+          }
+          // переименовать ноду в сам ключ
+          try { textNode.name = item.key; } catch {}
         }
       }
-      figma.notify('Ключи сохранены в нодах');
+      figma.notify('Ключи применены и имена обновлены');
       break;
     }
     case 'apply-language': {
@@ -205,11 +217,40 @@ figma.ui.onmessage = async (msg) => {
       const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => ({
         nodeId: n.id,
         name: n.name,
+        originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
         text: n.characters,
         key: n.getPluginData(PLUGIN_KEY_KEY),
         existing: true,
       })).filter(i => !namespace || i.key.startsWith(namespace + '.'));
       figma.ui.postMessage({ type: 'assigned-result', items });
+      break;
+    }
+    case 'restore-names': {
+      const items: { nodeId: string }[] = msg.items || [];
+      for (const it of items) {
+        const node = await figma.getNodeByIdAsync(it.nodeId);
+        if (node && node.type === 'TEXT') {
+          const textNode = node as TextNode;
+          const orig = textNode.getPluginData(PLUGIN_ORIG_NAME_KEY);
+            if (orig) {
+              try { textNode.name = orig; } catch {}
+            }
+        }
+      }
+      figma.notify('Имена восстановлены');
+      // Обновим текущий список если режим assigned
+      const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
+      const textNodes = collectTextNodes(sourceNodes);
+      const namespace = '';
+      const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => ({
+        nodeId: n.id,
+        name: n.name,
+        originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
+        text: n.characters,
+        key: n.getPluginData(PLUGIN_KEY_KEY),
+        existing: true,
+      }));
+      figma.ui.postMessage({ type: 'assigned-result', items: itemsOut });
       break;
     }
     case 'close': {

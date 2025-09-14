@@ -60,7 +60,7 @@
             <th><input type="checkbox" id="selectAll" /></th>
             <th>Ключ</th>
             <th>Текст</th>
-            <th>Слой</th>
+            <th>Оригинальное имя ноды</th>
             <th>Статус</th>
           </tr>
         </thead>
@@ -70,6 +70,7 @@
     <div class="actions" style="margin-top:6px;">
       <button id="applyKeys" disabled>Применить ключи к нодам</button>
       <button id="uploadKeys" disabled>Выгрузить в locize (base)</button>
+      <button id="restoreNames" disabled>Восстановить имена</button>
     </div>
     <div id="uploadProgress"><span></span></div>
   </fieldset>
@@ -106,6 +107,7 @@ const els = {
   loadLanguage: document.getElementById('loadLanguage'),
   langNamespace: document.getElementById('langNamespace'),
   uploadProgress: document.querySelector('#uploadProgress span'),
+  restoreNames: document.getElementById('restoreNames'),
 };
 
 let currentItems = []; // {nodeId,name,text,key,existing, selected}
@@ -139,13 +141,13 @@ function renderTable(){
     const tdText = document.createElement('td');
     tdText.textContent = item.text;
 
-    const tdName = document.createElement('td');
-    tdName.textContent = item.name;
+    const tdOrig = document.createElement('td');
+    tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
     tdStatus.textContent = item.existing ? 'есть' : 'новый';
 
-    tr.appendChild(tdSel); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdName); tr.appendChild(tdStatus);
+    tr.appendChild(tdSel); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
   });
   updateButtons();
@@ -155,6 +157,8 @@ function updateButtons(){
   const anySelected = currentItems.some(i => i.selected !== false);
   els.applyKeys.disabled = !anySelected;
   els.uploadKeys.disabled = !anySelected;
+  // Кнопка восстановления активна если есть хотя бы один элемент в списке
+  els.restoreNames.disabled = !currentItems.length;
 }
 
 // Settings load
@@ -217,6 +221,14 @@ els.loadLanguage.addEventListener('click', async () => {
     pm({ type: 'apply-language', map: translations, namespace: ns });
     setStatus('Применено');
   } catch(e){ setStatus('Ошибка загрузки: ' + e.message); }
+});
+
+els.restoreNames.addEventListener('click', () => {
+  const selected = currentItems.filter(i => i.selected !== false);
+  const targets = selected.length ? selected : currentItems; // если ничего не выбрано, все
+  lastMode = 'assigned'; // переходим в режим assigned для автообновления
+  pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
+  setStatus('Восстановление имён...');
 });
 
 function validateSettings(s){
