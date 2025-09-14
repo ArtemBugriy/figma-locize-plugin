@@ -122,6 +122,20 @@ async function ensureFonts(nodes: TextNode[]) {
   await Promise.all(promises);
 }
 
+function collectAssignedNamespaces(): string[] {
+  const set = new Set<string>();
+  const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
+  const textNodes = collectTextNodes(sourceNodes);
+  for (const n of textNodes) {
+    const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
+    if (fullKey) {
+      const dot = fullKey.indexOf('.');
+      if (dot > -1) set.add(fullKey.slice(0, dot));
+    }
+  }
+  return Array.from(set).sort();
+}
+
 async function applyTranslations(map: TranslationMap, namespace: string) {
   const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
   const allNodes: TextNode[] = collectTextNodes(sourceNodes);
@@ -132,7 +146,9 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
     if (!fullKey) continue;
     if (map[fullKey] !== undefined) {
       n.characters = map[fullKey];
-    } else if (fullKey.startsWith(namespace + '.')) {
+      continue;
+    }
+    if (namespace && fullKey.startsWith(namespace + '.')) {
       const shortKey = fullKey.replace(namespace + '.', '');
       if (map[shortKey] !== undefined) {
         n.characters = map[shortKey];
@@ -146,7 +162,7 @@ figma.showUI(__html__, { width: 620, height: 640 });
 // Авто уведомление UI об изменении выделения
 figma.on('selectionchange', () => {
   try {
-    figma.ui.postMessage({ type: 'selection-change', selectionLength: figma.currentPage.selection.length });
+    figma.ui.postMessage({ type: 'selection-change', selectionLength: figma.currentPage.selection.length, namespaces: collectAssignedNamespaces() });
   } catch (e) {
     // ignore
   }
@@ -199,14 +215,13 @@ figma.ui.onmessage = async (msg) => {
           const textNode = node as TextNode;
             // сохранить ключ
           textNode.setPluginData(PLUGIN_KEY_KEY, item.key);
-          // сохранить оригинальное имя, если ещё не сохранено
           if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
             textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
           }
-          // переименовать ноду в сам ключ
           try { textNode.name = item.key; } catch {}
         }
       }
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       figma.notify('Ключи применены и имена обновлены');
       break;
     }
@@ -238,6 +253,7 @@ figma.ui.onmessage = async (msg) => {
         };
       }).filter(i => !namespace || i.key.startsWith(namespace + '.'));
       figma.ui.postMessage({ type: 'assigned-result', items });
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       break;
     }
     case 'restore-names': {
@@ -247,16 +263,12 @@ figma.ui.onmessage = async (msg) => {
         if (node && node.type === 'TEXT') {
           const textNode = node as TextNode;
           const orig = textNode.getPluginData(PLUGIN_ORIG_NAME_KEY);
-            if (orig) {
-              try { textNode.name = orig; } catch {}
-            }
+          if (orig) { try { textNode.name = orig; } catch {} }
         }
       }
       figma.notify('Имена восстановлены');
-      // Обновим текущий список если режим assigned
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
-      const namespace = '';
       const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
         const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
         const dotIndex = fullKey.indexOf('.');
@@ -274,6 +286,11 @@ figma.ui.onmessage = async (msg) => {
         };
       });
       figma.ui.postMessage({ type: 'assigned-result', items: itemsOut });
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      break;
+    }
+    case 'get-namespaces': {
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       break;
     }
     case 'close': {

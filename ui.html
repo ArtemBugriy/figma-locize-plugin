@@ -80,10 +80,10 @@
     <legend>Переключение языка</legend>
     <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
       <label>Язык<select id="languageSelect"></select></label>
-      <label>Namespace<input id="langNamespace" type="text" value="common" /></label>
       <button id="loadLanguage">Загрузить и применить</button>
     </div>
-    <div class="small">Загружает переводы и применяет на ноды с назначенными ключами.</div>
+    <div class="small">Namespaces берутся автоматически из существующих ключей. Если ключи ещё не назначены – загрузка пропускается.</div>
+    <div class="small" id="nsListInfo" style="margin-top:4px;color:#444;"></div>
   </fieldset>
 
   <div class="status" id="status"></div>
@@ -106,13 +106,14 @@ const els = {
   selectAll: document.getElementById('selectAll'),
   languageSelect: document.getElementById('languageSelect'),
   loadLanguage: document.getElementById('loadLanguage'),
-  langNamespace: document.getElementById('langNamespace'),
   uploadProgress: document.querySelector('#uploadProgress span'),
   restoreNames: document.getElementById('restoreNames'),
+  nsListInfo: document.getElementById('nsListInfo'),
 };
 
 let currentItems = []; // {nodeId,name,text,key,existing, selected}
 let settingsLoaded = false;
+let detectedNamespaces = []; // авто обнаруженные namespaces
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 
@@ -188,8 +189,8 @@ pm({ type: 'load-settings' });
 els.saveSettings.addEventListener('click', () => {
   pm({ type: 'save-settings', settings: collectSettings() });
   if(!els.scanNamespace.value) els.scanNamespace.value = els.defaultNamespace.value || 'common';
-  if(!els.langNamespace.value) els.langNamespace.value = els.defaultNamespace.value || 'common';
   fetchLanguagesList();
+  pm({ type: 'get-namespaces' });
 });
 
 function collectSettings(){
@@ -234,13 +235,18 @@ els.selectAll.addEventListener('change', () => {
 els.loadLanguage.addEventListener('click', async () => {
   const s = collectSettings(); if(!validateSettings(s)) return;
   const lang = els.languageSelect.value; if(!lang) { setStatus('Выберите язык'); return; }
-  const ns = (els.langNamespace.value || s.defaultNamespace || 'common').trim();
-  try {
-    setStatus('Загрузка переводов...', false);
-    const translations = await fetchTranslations(s, lang, ns);
-    pm({ type: 'apply-language', map: translations, namespace: ns });
-    setStatus('Применено');
-  } catch(e){ setStatus('Ошибка загрузки: ' + e.message); }
+  if(!detectedNamespaces.length){ setStatus('Нет сохранённых ключей (namespaces пусты)'); return; }
+  setStatus('Загрузка переводов для: '+ detectedNamespaces.join(', '), false);
+  const sTime = Date.now();
+  for(const ns of detectedNamespaces){
+    try {
+      setStatus('→ '+ns+' ...', true);
+      const translations = await fetchTranslations(s, lang, ns);
+      pm({ type: 'apply-language', map: translations, namespace: ns });
+      setStatus('✓ '+ns, true);
+    } catch(e){ setStatus('✗ '+ns+': '+ e.message, true); }
+  }
+  setStatus('Готово за '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
 });
 
 els.restoreNames.addEventListener('click', () => {
@@ -321,15 +327,16 @@ window.onmessage = (event) => {
       els.baseLanguage.value = s.baseLanguage || 'en';
       els.defaultNamespace.value = s.defaultNamespace || 'common';
       if(!els.scanNamespace.value) els.scanNamespace.value = s.defaultNamespace || 'common';
-      if(!els.langNamespace.value) els.langNamespace.value = s.defaultNamespace || 'common';
       settingsLoaded = true;
       fetchLanguagesList();
+      pm({ type: 'get-namespaces' });
       break;
     }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
       currentItems = (msg.items || []).map(it => ({ ...it, selected: true }));
       renderTable();
+      pm({ type: 'get-namespaces' });
       break;
     }
     case 'assigned-result': {
@@ -347,6 +354,11 @@ window.onmessage = (event) => {
       } else if(lastMode === 'assigned') {
         pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
       }
+      if(msg.namespaces){ updateNamespaces(msg.namespaces); }
+      break;
+    }
+    case 'namespaces-result': {
+      updateNamespaces(msg.namespaces || []);
       break;
     }
   }
@@ -354,6 +366,11 @@ window.onmessage = (event) => {
 
 // Храним режим последнего списка
 let lastMode = null;
+
+function updateNamespaces(list){
+  detectedNamespaces = Array.isArray(list) ? list : [];
+  els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'Namespaces не найдены';
+}
 </script>
 </body>
 </html>
