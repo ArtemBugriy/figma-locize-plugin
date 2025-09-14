@@ -132,6 +132,15 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
 
 figma.showUI(__html__, { width: 620, height: 640 });
 
+// Авто уведомление UI об изменении выделения
+figma.on('selectionchange', () => {
+  try {
+    figma.ui.postMessage({ type: 'selection-change', selectionLength: figma.currentPage.selection.length });
+  } catch (e) {
+    // ignore
+  }
+});
+
 figma.ui.onmessage = async (msg) => {
   switch (msg.type) {
     case 'load-settings': {

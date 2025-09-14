@@ -178,11 +178,13 @@ function collectSettings(){
 }
 
 els.scanSelection.addEventListener('click', () => {
+  lastMode = 'scan';
   const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
   pm({ type: 'scan-selection', namespace: ns });
 });
 
 els.refreshAssigned.addEventListener('click', () => {
+  lastMode = 'assigned';
   pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
 });
 
@@ -302,8 +304,23 @@ window.onmessage = (event) => {
       renderTable();
       break;
     }
+    case 'selection-change': {
+      // Авто обновление по изменению выделения
+      // Логика: если последний показанный список основан на scan-selection, пересканируем;
+      // иначе если показывали assigned (все назначенные в текущем выделении/странице), обновим их.
+      if(lastMode === 'scan') {
+        const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
+        pm({ type: 'scan-selection', namespace: ns });
+      } else if(lastMode === 'assigned') {
+        pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
+      }
+      break;
+    }
   }
 };
+
+// Храним режим последнего списка
+let lastMode = null;
 </script>
 </body>
 </html>
