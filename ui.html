@@ -259,7 +259,7 @@ function validateSettings(s){
 async function fetchLanguagesList(){
   const s = collectSettings(); if(!s.projectId) return;
   try {
-    const res = await fetch(`https://api.locize.io/languages/${s.projectId}`);
+    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const langs = Object.keys(data);
@@ -269,7 +269,7 @@ async function fetchLanguagesList(){
 }
 
 async function fetchTranslations(s, language, namespace){
-  const url = `https://api.locize.io/${s.projectId}/${s.version}/${language}/${namespace}`;
+  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${namespace}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -299,7 +299,7 @@ async function uploadSelectedKeys(items, s){
 function setProgress(pct){ els.uploadProgress.style.width = pct.toFixed(1)+'%'; }
 
 async function putTranslation(s, language, namespace, key, value){
-  const url = `https://api.locize.io/${s.projectId}/${s.version}/${language}/${namespace}/${encodeURIComponent(key)}`;
+  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${namespace}/${encodeURIComponent(key)}`;
   const res = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type':'application/json', 'Authorization': s.apiKey },
