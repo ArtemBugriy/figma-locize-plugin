@@ -14,8 +14,9 @@
   table { border-collapse: collapse; width: 100%; font-size: 11px; }
   th, td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
   th { background: #f5f5f5; position: sticky; top: 0; }
-  tbody tr.new td { background: #f0fff4; }
-  tbody tr.existing td { background: #f7f7ff; }
+  /* заменяем старые статусы на синхронизацию */
+  tbody tr.synced td { background: #f0fff4; }
+  tbody tr.unsynced td { background: #fff7f7; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   button { cursor: pointer; padding: 6px 10px; font-size: 12px; }
   .row-flex { display: flex; gap: 8px; }
@@ -114,25 +115,26 @@ const els = {
   hideUnchecked: document.getElementById('hideUnchecked'),
 };
 
-let currentItems = []; // {nodeId,name,text,key,existing, selected}
-let detectedNamespaces = []; // авто обнаруженные namespaces
+let currentItems = []; // {nodeId,name,text,key,namespace,localKey,selected,synced}
+let detectedNamespaces = [];
 let hideUnchecked = false;
 
-function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
+// Кэш словарей base языка: { [ns]: Set(flatKeys) }
+const remoteCache = {};
 
+function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
 
 function renderTable(){
   els.tableBody.innerHTML = '';
   const itemsToRender = hideUnchecked ? currentItems.filter(i => i.selected !== false) : currentItems;
   itemsToRender.forEach((item) => {
-    // fallback если пришло только key
     if(!item.namespace || !item.localKey){
       const dot = (item.key||'').indexOf('.')
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
     const tr = document.createElement('tr');
-    tr.className = item.existing ? 'existing' : 'new';
+    tr.className = item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : '');
 
     const tdSel = document.createElement('td');
     const cb = document.createElement('input');
@@ -146,7 +148,7 @@ function renderTable(){
     nsInput.type = 'text';
     nsInput.value = item.namespace || '';
     nsInput.style.width = '90px';
-    nsInput.addEventListener('input', () => { item.namespace = nsInput.value.trim(); recomputeKey(item); });
+    nsInput.addEventListener('input', () => { item.namespace = nsInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); });
     tdNs.appendChild(nsInput);
 
     const tdKey = document.createElement('td');
@@ -154,7 +156,7 @@ function renderTable(){
     keyInput.type = 'text';
     keyInput.value = item.localKey || '';
     keyInput.className = 'key-input';
-    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); });
+    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); });
     tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
@@ -164,7 +166,7 @@ function renderTable(){
     tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
-    tdStatus.textContent = item.existing ? 'есть' : 'новый';
+    tdStatus.textContent = item.synced === true ? 'синхр.' : (item.synced === false ? 'нет' : '—');
 
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
@@ -190,6 +192,57 @@ function updateButtons(){
   els.restoreNames.disabled = !currentItems.length;
 }
 
+// Флэттенинг словаря в набор ключей
+function flattenKeys(obj){
+  const out = new Set();
+  const stack = [[obj, '']];
+  while(stack.length){
+    const [cur, pref] = stack.pop();
+    if(cur && typeof cur === 'object'){
+      for(const k of Object.keys(cur)){
+        const v = cur[k];
+        const p = pref ? pref + '.' + k : k;
+        if(v && typeof v === 'object') stack.push([v, p]); else out.add(p);
+      }
+    }
+  }
+  return out;
+}
+
+let statusRefreshTimer = null;
+function scheduleStatusRefresh(){
+  clearTimeout(statusRefreshTimer);
+  statusRefreshTimer = setTimeout(() => refreshSyncStatus(), 400);
+}
+
+async function refreshSyncStatus(){
+  const s = collectSettings();
+  if(!s.projectId || !s.version || !s.baseLanguage){ currentItems.forEach(i=>i.synced=undefined); renderTable(); return; }
+  const nsSet = Array.from(new Set(currentItems.map(i => (i.namespace||'').trim()).filter(Boolean)));
+  if(!nsSet.length){ currentItems.forEach(i=>i.synced=undefined); renderTable(); return; }
+  try {
+    const maps = await Promise.all(nsSet.map(async ns => {
+      if(remoteCache[ns]) return [ns, remoteCache[ns]];
+      const data = await fetchTranslations(s, s.baseLanguage, ns);
+      const flat = flattenKeys(data);
+      remoteCache[ns] = flat;
+      return [ns, flat];
+    }));
+    const nsToSet = Object.fromEntries(maps);
+    currentItems.forEach(item => {
+      const ns = (item.namespace||'').trim();
+      const lk = (item.localKey||'').trim();
+      if(!ns || !lk){ item.synced = undefined; return; }
+      const set = nsToSet[ns];
+      item.synced = !!(set && set.has(lk));
+    });
+  } catch(e){
+    setStatus('Проверка статусов не удалась: '+ (e && e.message ? e.message : e));
+    currentItems.forEach(i=>i.synced=undefined);
+  }
+  renderTable();
+}
+
 // Settings load
 pm({ type: 'load-settings' });
 
@@ -198,6 +251,7 @@ els.saveSettings.addEventListener('click', () => {
   if(!els.scanNamespace.value) els.scanNamespace.value = els.defaultNamespace.value || 'common';
   fetchLanguagesList();
   pm({ type: 'get-namespaces' });
+  scheduleStatusRefresh();
 });
 
 function collectSettings(){
@@ -224,6 +278,7 @@ els.hideUnchecked.addEventListener('change', () => {
 els.applyKeys.addEventListener('click', () => {
   const items = currentItems.filter(i => i.selected !== false).map(i => ({ ...i }));
   pm({ type: 'apply-keys', items });
+  scheduleStatusRefresh();
 });
 
 els.uploadKeys.addEventListener('click', async () => {
@@ -232,6 +287,9 @@ els.uploadKeys.addEventListener('click', async () => {
   const s = collectSettings();
   if(!validateSettings(s)) return;
   await uploadSelectedKeys(sel, s);
+  // сбрасываем кэш и обновляем статусы
+  for(const ns of Object.keys(remoteCache)) delete remoteCache[ns];
+  await refreshSyncStatus();
 });
 
 els.selectAll.addEventListener('change', () => {
@@ -336,18 +394,21 @@ window.onmessage = (event) => {
       if(!els.scanNamespace.value) els.scanNamespace.value = s.defaultNamespace || 'common';
       fetchLanguagesList();
       pm({ type: 'get-namespaces' });
+      scheduleStatusRefresh();
       break;
     }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false }));
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined }));
       renderTable();
       pm({ type: 'get-namespaces' });
+      scheduleStatusRefresh();
       break;
     }
     case 'assigned-result': {
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false }));
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined }));
       renderTable();
+      scheduleStatusRefresh();
       break;
     }
     case 'selection-change': {
