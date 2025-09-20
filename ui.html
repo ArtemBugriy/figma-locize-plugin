@@ -50,7 +50,10 @@
     <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
       <label>Namespace для скана<input id="scanNamespace" type="text" placeholder="common" /></label>
       <button id="scanSelection">Сканировать выделение</button>
-      <button id="refreshAssigned">Показать назначенные</button>
+      <label style="flex-direction:row; align-items:center; gap:6px; margin:0;">
+        <input id="hideUnchecked" type="checkbox" />
+        <span>Скрывать неотмеченные</span>
+      </label>
     </div>
     <div class="small">Генерация ключей выполняется на основе иерархии и названия слоя / текста.</div>
     <div id="keys-container">
@@ -98,7 +101,6 @@ const els = {
   scanNamespace: document.getElementById('scanNamespace'),
   saveSettings: document.getElementById('saveSettings'),
   scanSelection: document.getElementById('scanSelection'),
-  refreshAssigned: document.getElementById('refreshAssigned'),
   applyKeys: document.getElementById('applyKeys'),
   uploadKeys: document.getElementById('uploadKeys'),
   status: document.getElementById('status'),
@@ -109,11 +111,12 @@ const els = {
   uploadProgress: document.querySelector('#uploadProgress span'),
   restoreNames: document.getElementById('restoreNames'),
   nsListInfo: document.getElementById('nsListInfo'),
+  hideUnchecked: document.getElementById('hideUnchecked'),
 };
 
 let currentItems = []; // {nodeId,name,text,key,existing, selected}
-let settingsLoaded = false;
 let detectedNamespaces = []; // авто обнаруженные namespaces
+let hideUnchecked = false;
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 
@@ -121,11 +124,11 @@ function setStatus(msg, append=false){ if(!append) els.status.textContent=''; el
 
 function renderTable(){
   els.tableBody.innerHTML = '';
-  const nsSet = Array.from(new Set(currentItems.map(i => i.namespace).filter(Boolean))).sort();
-  currentItems.forEach((item) => {
+  const itemsToRender = hideUnchecked ? currentItems.filter(i => i.selected !== false) : currentItems;
+  itemsToRender.forEach((item) => {
     // fallback если пришло только key
     if(!item.namespace || !item.localKey){
-      const dot = (item.key||'').indexOf('.');
+      const dot = (item.key||'').indexOf('.')
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
     const tr = document.createElement('tr');
@@ -135,7 +138,7 @@ function renderTable(){
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = item.selected !== false;
-    cb.addEventListener('change', () => { item.selected = cb.checked; updateButtons(); });
+    cb.addEventListener('change', () => { item.selected = cb.checked; updateButtons(); pm({ type: 'set-selected', nodeId: item.nodeId, selected: item.selected }); if(hideUnchecked) renderTable(); });
     tdSel.appendChild(cb);
 
     const tdNs = document.createElement('td');
@@ -176,10 +179,14 @@ function recomputeKey(item){
 }
 
 function updateButtons(){
+  const all = currentItems.length > 0 && currentItems.every(i => i.selected !== false);
+  const none = currentItems.every(i => i.selected === false);
+  els.selectAll.indeterminate = !all && !none;
+  els.selectAll.checked = all && !none;
+
   const anySelected = currentItems.some(i => i.selected !== false);
   els.applyKeys.disabled = !anySelected;
   els.uploadKeys.disabled = !anySelected;
-  // Кнопка восстановления активна если есть хотя бы один элемент в списке
   els.restoreNames.disabled = !currentItems.length;
 }
 
@@ -209,9 +216,9 @@ els.scanSelection.addEventListener('click', () => {
   pm({ type: 'scan-selection', namespace: ns });
 });
 
-els.refreshAssigned.addEventListener('click', () => {
-  lastMode = 'assigned';
-  pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
+els.hideUnchecked.addEventListener('change', () => {
+  hideUnchecked = els.hideUnchecked.checked;
+  renderTable();
 });
 
 els.applyKeys.addEventListener('click', () => {
@@ -229,11 +236,12 @@ els.uploadKeys.addEventListener('click', async () => {
 
 els.selectAll.addEventListener('change', () => {
   currentItems.forEach(i => i.selected = els.selectAll.checked);
+  pm({ type: 'set-selected-bulk', list: currentItems.map(i => ({ nodeId: i.nodeId, selected: i.selected !== false })) });
   renderTable();
 });
 
 els.loadLanguage.addEventListener('click', async () => {
-  const s = collectSettings(); if(!validateSettings(s)) return;
+  const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Заполните настройки'); return; }
   const lang = els.languageSelect.value; if(!lang) { setStatus('Выберите язык'); return; }
   if(!detectedNamespaces.length){ setStatus('Нет сохранённых ключей (namespaces пусты)'); return; }
   setStatus('Загрузка переводов для: '+ detectedNamespaces.join(', '), false);
@@ -251,8 +259,7 @@ els.loadLanguage.addEventListener('click', async () => {
 
 els.restoreNames.addEventListener('click', () => {
   const selected = currentItems.filter(i => i.selected !== false);
-  const targets = selected.length ? selected : currentItems; // если ничего не выбрано, все
-  lastMode = 'assigned'; // переходим в режим assigned для автообновления
+  const targets = selected.length ? selected : currentItems;
   pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
   setStatus('Восстановление имён...');
 });
@@ -327,32 +334,26 @@ window.onmessage = (event) => {
       els.baseLanguage.value = s.baseLanguage || 'en';
       els.defaultNamespace.value = s.defaultNamespace || 'common';
       if(!els.scanNamespace.value) els.scanNamespace.value = s.defaultNamespace || 'common';
-      settingsLoaded = true;
       fetchLanguagesList();
       pm({ type: 'get-namespaces' });
       break;
     }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: true }));
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false }));
       renderTable();
       pm({ type: 'get-namespaces' });
       break;
     }
     case 'assigned-result': {
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: true }));
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false }));
       renderTable();
       break;
     }
     case 'selection-change': {
-      // Авто обновление по изменению выделения
-      // Логика: если последний показанный список основан на scan-selection, пересканируем;
-      // иначе если показывали assigned (все назначенные в текущем выделении/странице), обновим их.
       if(lastMode === 'scan') {
         const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
         pm({ type: 'scan-selection', namespace: ns });
-      } else if(lastMode === 'assigned') {
-        pm({ type: 'get-assigned', namespace: (els.scanNamespace.value || '').trim() });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }
       break;
