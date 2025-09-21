@@ -18,9 +18,9 @@ interface ScanItem {
   name: string;
   originalName: string;
   text: string;
-  key: string; // полный ключ namespace.local
+  key: string; // full key namespace.local
   namespace: string; // namespace
-  localKey: string; // часть без namespace
+  localKey: string; // key part without namespace
   existing: boolean;
 }
 
@@ -159,7 +159,7 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
 
 figma.showUI(__html__, { width: 620, height: 640 });
 
-// Авто уведомление UI об изменении выделения
+// Auto notify UI on selection change
 figma.on('selectionchange', () => {
   try {
     figma.ui.postMessage({ type: 'selection-change', selectionLength: figma.currentPage.selection.length, namespaces: collectAssignedNamespaces() });
@@ -188,19 +188,19 @@ figma.ui.onmessage = async (msg) => {
       await figma.clientStorage.setAsync('locize.version', s.version);
       await figma.clientStorage.setAsync('locize.defaultNamespace', s.defaultNamespace);
       await figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage);
-      figma.notify('Настройки сохранены');
+      figma.notify('Settings saved');
       break;
     }
     case 'scan-selection': {
       const namespace: string = msg.namespace || 'common';
       const selection = figma.currentPage.selection;
       if (!selection.length) {
-        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'Нет выделения' });
+        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No selection' });
         break;
       }
       const textNodes = collectTextNodes(selection as readonly SceneNode[]);
       if (!textNodes.length) {
-        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'Текстовые ноды не найдены' });
+        figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No text nodes found' });
         break;
       }
       const items = generateKeys(textNodes, namespace);
@@ -213,7 +213,7 @@ figma.ui.onmessage = async (msg) => {
         const node = await figma.getNodeByIdAsync(item.nodeId);
         if (node && node.type === 'TEXT') {
           const textNode = node as TextNode;
-            // сохранить ключ
+            // save key
           textNode.setPluginData(PLUGIN_KEY_KEY, item.key);
           if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
             textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
@@ -226,14 +226,14 @@ figma.ui.onmessage = async (msg) => {
         }
       }
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
-      figma.notify('Ключи применены и имена обновлены');
+      figma.notify('Keys applied and names updated');
       break;
     }
     case 'apply-language': {
       const map: TranslationMap = msg.map;
       const namespace: string = msg.namespace;
       await applyTranslations(map, namespace);
-      figma.notify('Применён язык');
+      figma.notify('Language applied');
       break;
     }
     case 'get-assigned': {
@@ -276,7 +276,7 @@ figma.ui.onmessage = async (msg) => {
           }
         }
       }
-      figma.notify('Имена восстановлены');
+      figma.notify('Names restored');
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
       const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {

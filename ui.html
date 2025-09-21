@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <title>Locize Integration</title>
@@ -14,7 +14,7 @@
   table { border-collapse: collapse; width: 100%; font-size: 11px; }
   th, td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
   th { background: #f5f5f5; position: sticky; top: 0; }
-  /* заменяем старые статусы на синхронизацию */
+  /* keep old statuses for sync coloring */
   tbody tr.synced td { background: #f0fff4; }
   tbody tr.unsynced td { background: #fff7f7; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -34,29 +34,29 @@
 </head>
 <body>
   <fieldset>
-    <legend>Настройки</legend>
+    <legend>Settings</legend>
     <div class="row-flex" style="align-items:flex-end; flex-wrap:wrap;">
       <label class="grow">Project ID<input id="projectId" type="text" placeholder="project id" /></label>
       <label class="grow">API Key (write)<input id="apiKey" type="password" placeholder="write api key" /></label>
       <label>Version<input id="version" type="text" value="latest" /></label>
       <label>Base Lang<input id="baseLanguage" type="text" value="en" /></label>
       <label>Namespace<input id="defaultNamespace" type="text" value="common" /></label>
-      <button id="saveSettings" style="height:32px;">Сохранить</button>
+      <button id="saveSettings" style="height:32px;">Save</button>
     </div>
-    <div class="small">Данные локально сохраняются в clientStorage плагина.</div>
+    <div class="small">Data is saved locally in the plugin clientStorage.</div>
   </fieldset>
 
   <fieldset>
-    <legend>Работа с ключами</legend>
+    <legend>Key management</legend>
     <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
-      <label>Namespace для скана<input id="scanNamespace" type="text" placeholder="common" /></label>
-      <button id="scanSelection">Сканировать выделение</button>
+      <label>Namespace to scan<input id="scanNamespace" type="text" placeholder="common" /></label>
+      <button id="scanSelection">Scan selection</button>
       <label style="flex-direction:row; align-items:center; gap:6px; margin:0;">
         <input id="hideUnchecked" type="checkbox" />
-        <span>Скрывать неотмеченные</span>
+        <span>Hide unchecked</span>
       </label>
     </div>
-    <div class="small">Генерация ключей выполняется на основе иерархии и названия слоя / текста.</div>
+    <div class="small">Keys are generated based on hierarchy and layer/text name.</div>
     <div id="keys-container">
       <table id="keysTable">
         <thead>
@@ -64,29 +64,29 @@
             <th><input type="checkbox" id="selectAll" /></th>
             <th>Namespace</th>
             <th>Key</th>
-            <th>Текст</th>
-            <th>Оригинальное имя</th>
-            <th>Статус</th>
+            <th>Text</th>
+            <th>Original name</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
     <div class="actions" style="margin-top:6px;">
-      <button id="applyKeys" disabled>Применить ключи к нодам</button>
-      <button id="uploadKeys" disabled>Выгрузить в locize (base)</button>
-      <button id="restoreNames" disabled>Восстановить имена</button>
+      <button id="applyKeys" disabled>Apply keys to nodes</button>
+      <button id="uploadKeys" disabled>Upload to locize (base)</button>
+      <button id="restoreNames" disabled>Restore names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
   </fieldset>
 
   <fieldset>
-    <legend>Переключение языка</legend>
+    <legend>Language</legend>
     <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
-      <label>Язык<select id="languageSelect"></select></label>
-      <button id="loadLanguage">Загрузить и применить</button>
+      <label>Language<select id="languageSelect"></select></label>
+      <button id="loadLanguage">Load and apply</button>
     </div>
-    <div class="small">Namespaces берутся автоматически из существующих ключей. Если ключи ещё не назначены – загрузка пропускается.</div>
+    <div class="small">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
     <div class="small" id="nsListInfo" style="margin-top:4px;color:#444;"></div>
   </fieldset>
 
@@ -119,7 +119,7 @@ let currentItems = []; // {nodeId,name,text,key,namespace,localKey,selected,sync
 let detectedNamespaces = [];
 let hideUnchecked = false;
 
-// Кэш словарей base языка: { [ns]: Set(flatKeys) }
+// Cache of base language dictionaries: { [ns]: Set(flatKeys) }
 const remoteCache = {};
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
@@ -166,7 +166,7 @@ function renderTable(){
     tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
-    tdStatus.textContent = item.synced === true ? 'синхр.' : (item.synced === false ? 'нет' : '—');
+    tdStatus.textContent = item.synced === true ? 'synced' : (item.synced === false ? 'missing' : '—');
 
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
@@ -192,7 +192,7 @@ function updateButtons(){
   els.restoreNames.disabled = !currentItems.length;
 }
 
-// Флэттенинг словаря в набор ключей
+// Flatten dictionary into a set of keys
 function flattenKeys(obj){
   const out = new Set();
   const stack = [[obj, '']];
@@ -237,7 +237,7 @@ async function refreshSyncStatus(){
       item.synced = !!(set && set.has(lk));
     });
   } catch(e){
-    setStatus('Проверка статусов не удалась: '+ (e && e.message ? e.message : e));
+    setStatus('Status check failed: '+ (e && e.message ? e.message : e));
     currentItems.forEach(i=>i.synced=undefined);
   }
   renderTable();
@@ -287,7 +287,7 @@ els.uploadKeys.addEventListener('click', async () => {
   const s = collectSettings();
   if(!validateSettings(s)) return;
   await uploadSelectedKeys(sel, s);
-  // сбрасываем кэш и обновляем статусы
+  // reset cache and refresh statuses
   for(const ns of Object.keys(remoteCache)) delete remoteCache[ns];
   await refreshSyncStatus();
 });
@@ -299,10 +299,10 @@ els.selectAll.addEventListener('change', () => {
 });
 
 els.loadLanguage.addEventListener('click', async () => {
-  const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Заполните настройки'); return; }
-  const lang = els.languageSelect.value; if(!lang) { setStatus('Выберите язык'); return; }
-  if(!detectedNamespaces.length){ setStatus('Нет сохранённых ключей (namespaces пусты)'); return; }
-  setStatus('Загрузка переводов для: '+ detectedNamespaces.join(', '), false);
+  const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
+  const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
+  if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
+  setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
   for(const ns of detectedNamespaces){
     try {
@@ -312,18 +312,18 @@ els.loadLanguage.addEventListener('click', async () => {
       setStatus('✓ '+ns, true);
     } catch(e){ setStatus('✗ '+ns+': '+ e.message, true); }
   }
-  setStatus('Готово за '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
+  setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
 });
 
 els.restoreNames.addEventListener('click', () => {
   const selected = currentItems.filter(i => i.selected !== false);
   const targets = selected.length ? selected : currentItems;
   pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
-  setStatus('Восстановление имён...');
+  setStatus('Restoring names...');
 });
 
 function validateSettings(s){
-  if(!s.projectId || !s.apiKey){ setStatus('ProjectId и ApiKey обязательны'); return false; }
+  if(!s.projectId || !s.apiKey){ setStatus('ProjectId and ApiKey are required'); return false; }
   return true;
 }
 
@@ -336,7 +336,7 @@ async function fetchLanguagesList(){
     const langs = Object.keys(data);
     els.languageSelect.innerHTML = langs.map(l => `<option value="${l}">${l}</option>`).join('');
     if(s.baseLanguage && !els.languageSelect.value) els.languageSelect.value = s.baseLanguage;
-  } catch(e){ setStatus('Не удалось загрузить языки: '+ e.message); }
+  } catch(e){ setStatus('Failed to load languages: '+ e.message); }
 }
 
 async function fetchTranslations(s, language, namespace){
@@ -349,22 +349,22 @@ async function fetchTranslations(s, language, namespace){
 async function uploadSelectedKeys(items, s){
   const baseLang = s.baseLanguage || 'en';
   let done = 0; const total = items.length;
-  setStatus('Выгрузка ключей...');
+  setStatus('Uploading keys...');
   setProgress(0);
   for(const it of items){
     try {
       const ns = it.namespace || (s.defaultNamespace || 'common');
       const local = it.localKey || it.key.replace(/^.*\./,'');
-      if(!ns || !local){ throw new Error('namespace/localKey пустые'); }
+      if(!ns || !local){ throw new Error('namespace/localKey are empty'); }
       await putTranslation(s, baseLang, ns, local, it.text);
       done++;
       setProgress(done/total*100);
       setStatus(`(${done}/${total}) ${ns}.${local} OK`, true);
     } catch(e){
-      setStatus('Ошибка для '+ (it.key||'?') +': '+ e.message, true);
+      setStatus('Error for '+ (it.key||'?') +': '+ e.message, true);
     }
   }
-  setStatus('Готово. Загружено: '+done+'/'+total, true);
+  setStatus('Done. Uploaded: '+done+'/'+total, true);
 }
 
 function setProgress(pct){ els.uploadProgress.style.width = pct.toFixed(1)+'%'; }
@@ -426,12 +426,12 @@ window.onmessage = (event) => {
   }
 };
 
-// Храним режим последнего списка
+// Remember last list mode
 let lastMode = null;
 
 function updateNamespaces(list){
   detectedNamespaces = Array.isArray(list) ? list : [];
-  els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'Namespaces не найдены';
+  els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'No namespaces found';
 }
 </script>
 </body>
