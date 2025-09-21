@@ -218,7 +218,11 @@ figma.ui.onmessage = async (msg) => {
           if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
             textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
           }
-          try { textNode.name = item.key; } catch {}
+          try {
+            textNode.name = item.key;
+          } catch (error) {
+            console.log(error);
+          }
         }
       }
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
@@ -263,7 +267,13 @@ figma.ui.onmessage = async (msg) => {
         if (node && node.type === 'TEXT') {
           const textNode = node as TextNode;
           const orig = textNode.getPluginData(PLUGIN_ORIG_NAME_KEY);
-          if (orig) { try { textNode.name = orig; } catch {} }
+          if (orig) {
+            try {
+              textNode.name = orig;
+            } catch (error) {
+              console.log(error);
+            }
+          }
         }
       }
       figma.notify('Имена восстановлены');
