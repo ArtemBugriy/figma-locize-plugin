@@ -9,7 +9,6 @@ interface Settings {
   projectId: string;
   apiKey: string; // write key
   version: string; // e.g. 'latest' or environment version
-  defaultNamespace: string;
   baseLanguage: string;
 }
 
@@ -175,7 +174,6 @@ figma.ui.onmessage = async (msg) => {
         projectId: (await figma.clientStorage.getAsync('locize.projectId')) || '',
         apiKey: (await figma.clientStorage.getAsync('locize.apiKey')) || '',
         version: (await figma.clientStorage.getAsync('locize.version')) || 'latest',
-        defaultNamespace: (await figma.clientStorage.getAsync('locize.defaultNamespace')) || 'common',
         baseLanguage: (await figma.clientStorage.getAsync('locize.baseLanguage')) || 'en',
       };
       figma.ui.postMessage({ type: 'settings-loaded', settings });
@@ -186,7 +184,6 @@ figma.ui.onmessage = async (msg) => {
       await figma.clientStorage.setAsync('locize.projectId', s.projectId);
       await figma.clientStorage.setAsync('locize.apiKey', s.apiKey);
       await figma.clientStorage.setAsync('locize.version', s.version);
-      await figma.clientStorage.setAsync('locize.defaultNamespace', s.defaultNamespace);
       await figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage);
       figma.notify('Settings saved');
       break;
@@ -301,6 +298,11 @@ figma.ui.onmessage = async (msg) => {
     }
     case 'get-namespaces': {
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      break;
+    }
+    case 'notify': {
+      const text = (msg as { message?: string }).message || '';
+      if (text) figma.notify(text);
       break;
     }
     case 'close': {

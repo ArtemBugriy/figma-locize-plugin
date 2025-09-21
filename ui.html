@@ -8,7 +8,7 @@
   h2 { margin: 8px 0 4px; font-size: 14px; }
   fieldset { border: 1px solid #ccc; padding: 8px 10px 10px; margin-bottom: 10px; }
   legend { padding: 0 4px; font-weight: 600; }
-  label { display: flex; flex-direction: column; font-size: 11px; gap: 2px; margin-bottom: 6px; }
+  label { display: flex; flex-direction: column; font-size: 11px; gap: 2px; }
   input[type=text], input[type=password], select { padding: 4px 6px; font-size: 12px; }
   input.key-input { width: 220px; }
   table { border-collapse: collapse; width: 100%; font-size: 11px; }
@@ -18,7 +18,7 @@
   tbody tr.synced td { background: #f0fff4; }
   tbody tr.unsynced td { background: #fff7f7; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  button { cursor: pointer; padding: 6px 10px; font-size: 12px; }
+  button { cursor: pointer; padding: 4px 12px; font-size: 12px; }
   .row-flex { display: flex; gap: 8px; }
   .small { font-size: 10px; color: #666; }
   .status { margin-top: 6px; min-height: 16px; font-size: 11px; white-space: pre-line; }
@@ -40,23 +40,22 @@
       <label class="grow">API Key (write)<input id="apiKey" type="password" placeholder="write api key" /></label>
       <label>Version<input id="version" type="text" value="latest" /></label>
       <label>Base Lang<input id="baseLanguage" type="text" value="en" /></label>
-      <label>Namespace<input id="defaultNamespace" type="text" value="common" /></label>
-      <button id="saveSettings" style="height:32px;">Save</button>
+      <button id="saveSettings">Save</button>
     </div>
-    <div class="small">Data is saved locally in the plugin clientStorage.</div>
+    <div class="small" style="margin-top: 12px;">Data is saved locally in the plugin clientStorage.</div>
   </fieldset>
 
   <fieldset>
     <legend>Key management</legend>
-    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
-      <label>Namespace to scan<input id="scanNamespace" type="text" placeholder="common" /></label>
+    <div class="row-flex gap" style="align-items:flex-end; flex-wrap:wrap;">
+      <label>Namespace<input id="scanNamespace" type="text" placeholder="Common" /></label>
       <button id="scanSelection">Scan selection</button>
       <label style="flex-direction:row; align-items:center; gap:6px; margin:0;">
         <input id="hideUnchecked" type="checkbox" />
         <span>Hide unchecked</span>
       </label>
     </div>
-    <div class="small">Keys are generated based on hierarchy and layer/text name.</div>
+    <div class="small" style="margin: 6px 0;">Keys are generated based on hierarchy and layer/text name.</div>
     <div id="keys-container">
       <table id="keysTable">
         <thead>
@@ -98,7 +97,6 @@ const els = {
   apiKey: document.getElementById('apiKey'),
   version: document.getElementById('version'),
   baseLanguage: document.getElementById('baseLanguage'),
-  defaultNamespace: document.getElementById('defaultNamespace'),
   scanNamespace: document.getElementById('scanNamespace'),
   saveSettings: document.getElementById('saveSettings'),
   scanSelection: document.getElementById('scanSelection'),
@@ -118,6 +116,10 @@ const els = {
 let currentItems = []; // {nodeId,name,text,key,namespace,localKey,selected,synced}
 let detectedNamespaces = [];
 let hideUnchecked = false;
+
+// Track verification sequence and allow cancellation
+let verifyController = null; // AbortController | null
+let verifySeq = 0;
 
 // Cache of base language dictionaries: { [ns]: Set(flatKeys) }
 const remoteCache = {};
@@ -246,12 +248,25 @@ async function refreshSyncStatus(){
 // Settings load
 pm({ type: 'load-settings' });
 
-els.saveSettings.addEventListener('click', () => {
-  pm({ type: 'save-settings', settings: collectSettings() });
-  if(!els.scanNamespace.value) els.scanNamespace.value = els.defaultNamespace.value || 'common';
-  fetchLanguagesList();
-  pm({ type: 'get-namespaces' });
-  scheduleStatusRefresh();
+els.saveSettings.addEventListener('click', async () => {
+  const s = collectSettings();
+  if(!validateSettings(s)) { pm({ type:'notify', message:'ProjectId and ApiKey are required' }); return; }
+  if(verifyController) { try { verifyController.abort(); } catch(_){} }
+  verifyController = new AbortController();
+  const seq = ++verifySeq;
+  els.saveSettings.disabled = true;
+  const ok = await verifyCredentials(s, verifyController.signal, seq);
+  if(seq !== verifySeq) { return; }
+  els.saveSettings.disabled = false;
+  if(ok){
+    pm({ type: 'save-settings', settings: s });
+    if(!els.scanNamespace.value) els.scanNamespace.value = 'common';
+    fetchLanguagesList();
+    pm({ type: 'get-namespaces' });
+    scheduleStatusRefresh();
+  } else {
+    pm({ type:'notify', message:'Invalid Locize credentials' });
+  }
 });
 
 function collectSettings(){
@@ -260,13 +275,12 @@ function collectSettings(){
     apiKey: els.apiKey.value.trim(),
     version: els.version.value.trim() || 'latest',
     baseLanguage: els.baseLanguage.value.trim() || 'en',
-    defaultNamespace: els.defaultNamespace.value.trim() || 'common'
   };
 }
 
 els.scanSelection.addEventListener('click', () => {
   lastMode = 'scan';
-  const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
+  const ns = (els.scanNamespace.value || 'common').trim();
   pm({ type: 'scan-selection', namespace: ns });
 });
 
@@ -287,7 +301,6 @@ els.uploadKeys.addEventListener('click', async () => {
   const s = collectSettings();
   if(!validateSettings(s)) return;
   await uploadSelectedKeys(sel, s);
-  // reset cache and refresh statuses
   for(const ns of Object.keys(remoteCache)) delete remoteCache[ns];
   await refreshSyncStatus();
 });
@@ -353,7 +366,7 @@ async function uploadSelectedKeys(items, s){
   setProgress(0);
   for(const it of items){
     try {
-      const ns = it.namespace || (s.defaultNamespace || 'common');
+      const ns = it.namespace || 'common';
       const local = it.localKey || it.key.replace(/^.*\./,'');
       if(!ns || !local){ throw new Error('namespace/localKey are empty'); }
       await putTranslation(s, baseLang, ns, local, it.text);
@@ -380,6 +393,27 @@ async function putTranslation(s, language, namespace, key, value){
   return res.json();
 }
 
+function isObjectEmpty(obj){
+  if(!obj || typeof obj !== 'object') return true;
+  return Object.keys(obj).length === 0;
+}
+
+async function verifyCredentials(s, signal, seq){
+  // Basic validation already done before
+  const isCurrent = () => seq === verifySeq;
+  if(isCurrent()) setStatus('Verifying credentials...');
+  try {
+    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`, { signal });
+    const json = await res.json();
+    if (isObjectEmpty(json)) { if(isCurrent()) setStatus('Project is empty or not found', true); return false; }
+    if(res.status === 404){ if(isCurrent()) setStatus('Project not found (404)', true); return false; }
+    if(res.status === 401 || res.status === 403){ if(isCurrent()) setStatus('Unauthorized to access project: '+res.status, true); return false; }
+    if(!res.ok){ if(isCurrent()) setStatus('Project check failed: HTTP '+res.status, true); return false; }
+    if(isCurrent()) setStatus('Credentials verified ✓', true);
+    return true;
+  } catch(e){ if(signal?.aborted) { return false; } if(isCurrent()) setStatus('Project check failed: '+ (e && e.message ? e.message : e), true); return false; }
+}
+
 window.onmessage = (event) => {
   const msg = event.data.pluginMessage;
   if(!msg) return;
@@ -390,8 +424,7 @@ window.onmessage = (event) => {
       els.apiKey.value = s.apiKey || '';
       els.version.value = s.version || 'latest';
       els.baseLanguage.value = s.baseLanguage || 'en';
-      els.defaultNamespace.value = s.defaultNamespace || 'common';
-      if(!els.scanNamespace.value) els.scanNamespace.value = s.defaultNamespace || 'common';
+      if(!els.scanNamespace.value) els.scanNamespace.value = 'common';
       fetchLanguagesList();
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
@@ -413,7 +446,7 @@ window.onmessage = (event) => {
     }
     case 'selection-change': {
       if(lastMode === 'scan') {
-        const ns = (els.scanNamespace.value || els.defaultNamespace.value || 'common').trim();
+        const ns = (els.scanNamespace.value || 'common').trim();
         pm({ type: 'scan-selection', namespace: ns });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }
@@ -426,7 +459,6 @@ window.onmessage = (event) => {
   }
 };
 
-// Remember last list mode
 let lastMode = null;
 
 function updateNamespaces(list){
