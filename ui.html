@@ -22,7 +22,8 @@
   th { background: #f5f5f5; position: sticky; top: 0; }
   /* keep old statuses for sync coloring */
   tbody tr.synced td { background: #f0fff4; }
-  tbody tr.unsynced td { background: #fff7f7; }
+  tbody tr.unsynced td { background: #fff8db; }
+  tbody tr.missing td { background: #fff7f7; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   button { cursor: pointer; padding: 4px 12px; font-size: 12px; }
   .row-flex { display: flex; gap: 8px; }
@@ -84,6 +85,7 @@
             <th>Namespace</th>
             <th>Key</th>
             <th>Text</th>
+            <th>Remote Text</th>
             <th>Original name</th>
             <th>Status</th>
           </tr>
@@ -93,7 +95,7 @@
     </div>
     <div class="actions" style="margin-top:6px;">
       <button id="applyKeys" disabled>Apply keys to nodes</button>
-      <button id="uploadKeys" disabled>Upload to locize (base)</button>
+      <button id="uploadKeys" disabled>Upload to locize</button>
       <button id="restoreNames" disabled>Restore names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
@@ -125,6 +127,7 @@ const els = {
 let currentItems = []; // {nodeId,name,text,key,namespace,localKey,selected,synced}
 let detectedNamespaces = [];
 let hideUnchecked = false;
+let currentLanguage = '';
 
 // Track verification sequence and allow cancellation
 let verifyController = null; // AbortController | null
@@ -145,7 +148,8 @@ function renderTable(){
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
     const tr = document.createElement('tr');
-    tr.className = item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : '');
+    const statusClass = item.status || (item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : ''));
+    tr.className = statusClass;
 
     const tdSel = document.createElement('td');
     const cb = document.createElement('input');
@@ -171,15 +175,19 @@ function renderTable(){
     tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
-    tdText.textContent = item.text;
+    tdText.textContent = item.text ?? '';
+
+    const tdRemote = document.createElement('td');
+    tdRemote.textContent = item.remoteText ?? '';
 
     const tdOrig = document.createElement('td');
     tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
-    tdStatus.textContent = item.synced === true ? 'synced' : (item.synced === false ? 'missing' : '—');
+    const statusText = item.status ? item.status : (item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : '—'));
+    tdStatus.textContent = statusText;
 
-    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
+    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
   });
   updateButtons();
@@ -248,28 +256,46 @@ function scheduleStatusRefresh(){
 
 async function refreshSyncStatus(){
   const s = collectSettings();
-  if(!s.projectId || !s.version || !s.baseLanguage){ currentItems.forEach(i=>i.synced=undefined); renderTable(); return; }
+  if(!currentLanguage){ currentLanguage = els.languageSelect.value || s.baseLanguage || 'en'; }
   const nsSet = Array.from(new Set(currentItems.map(i => (i.namespace||'').trim()).filter(Boolean)));
-  if(!nsSet.length){ currentItems.forEach(i=>i.synced=undefined); renderTable(); return; }
+  if(!nsSet.length){ currentItems.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderTable(); return; }
   try {
-    const maps = await Promise.all(nsSet.map(async ns => {
-      if(remoteCache[ns]) return [ns, remoteCache[ns]];
-      const data = await fetchTranslations(s, s.baseLanguage, ns);
-      const flat = flattenKeys(data);
-      remoteCache[ns] = flat;
-      return [ns, flat];
-    }));
-    const nsToSet = Object.fromEntries(maps);
+    // Ensure cache for each ns (for currentLanguage)
+    for(const ns of nsSet){
+      if(!remoteCache[ns]){
+        const data = await fetchTranslations(s, currentLanguage, ns);
+        remoteCache[ns] = flattenToMap(data);
+      }
+    }
+    // Update items synced state using currentLanguage translations
     currentItems.forEach(item => {
       const ns = (item.namespace||'').trim();
       const lk = (item.localKey||'').trim();
-      if(!ns || !lk){ item.synced = undefined; return; }
-      const set = nsToSet[ns];
-      item.synced = !!(set && set.has(lk));
+      if(!ns || !lk){ item.synced = undefined; item.remoteText = undefined; item.status = undefined; return; }
+      const map = remoteCache[ns] || {};
+      const hasRemote = Object.prototype.hasOwnProperty.call(map, lk);
+      const remote = hasRemote ? map[lk] : undefined;
+      item.remoteText = remote;
+      const local = String(item.text ?? '');
+      if(!hasRemote){
+        item.status = 'missing';
+        item.synced = false;
+      } else {
+        const remoteStr = String(remote ?? '');
+        const equal = local === remoteStr;
+        const remoteEmpty = remoteStr === '';
+        if(remoteEmpty || !equal){
+          item.status = 'unsynced';
+          item.synced = false;
+        } else {
+          item.status = 'synced';
+          item.synced = true;
+        }
+      }
     });
   } catch(e){
     setStatus('Status check failed: '+ (e && e.message ? e.message : e));
-    currentItems.forEach(i=>i.synced=undefined);
+    currentItems.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; });
   }
   renderTable();
 }
@@ -350,18 +376,25 @@ els.selectAll.addEventListener('change', () => {
 els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
   const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
+  currentLanguage = lang;
   if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
   setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
+  // clear cache for new language
+  for(const k of Object.keys(remoteCache)) delete remoteCache[k];
   for(const ns of detectedNamespaces){
     try {
       setStatus('→ '+ns+' ...', true);
       const translations = await fetchTranslations(s, lang, ns);
       const flatMap = flattenToMap(translations);
+      remoteCache[ns] = flatMap;
       pm({ type: 'apply-language', map: flatMap, namespace: ns });
       setStatus('✓ '+ns, true);
     } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
   }
+  // Ask Figma to return current assigned items (to refresh node texts)
+  pm({ type: 'get-assigned' });
+  await refreshSyncStatus();
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
 });
 
@@ -398,7 +431,7 @@ async function fetchTranslations(s, language, namespace){
 }
 
 async function uploadSelectedKeys(items, s){
-  const baseLang = s.baseLanguage || 'en';
+  const lang = els.languageSelect.value || s.baseLanguage || 'en';
   // group by namespace
   const byNs = new Map();
   for(const it of items){
@@ -411,8 +444,9 @@ async function uploadSelectedKeys(items, s){
   const totalKeys = Array.from(byNs.values()).reduce((acc, arr) => acc + arr.length, 0);
   if(totalKeys === 0){ setStatus('Nothing to upload'); return; }
 
-  setStatus('Uploading keys (bulk update)...');
-  
+  setStatus(`Uploading keys to ${lang} (bulk update)...`);
+  let sentKeys = 0;
+  setProgress(0);
   for(const [ns, entries] of byNs.entries()){
     setStatus(`Namespace ${ns}: ${entries.length} key(s)` , true);
     // chunk to 1000 keys per request
@@ -420,7 +454,9 @@ async function uploadSelectedKeys(items, s){
       const payload = {};
       for(const {key, value} of chunk){ payload[key] = value; }
       try {
-        const resInfo = await updateTranslationsBatch(s, baseLang, ns, payload);
+        const resInfo = await updateTranslationsBatch(s, lang, ns, payload);
+        sentKeys += chunk.length;
+        setProgress(sentKeys/totalKeys*100);
         const note = resInfo.note ? ` (${resInfo.note})` : '';
         setStatus(`✓ ${ns}: +${chunk.length} translations${note}`, true);
       } catch(e){
@@ -428,7 +464,14 @@ async function uploadSelectedKeys(items, s){
       }
     }
   }
-  setStatus(`Done. Uploaded.`, true);
+  // Invalidate and refresh cache for current language
+  for(const k of Object.keys(remoteCache)) delete remoteCache[k];
+  await refreshSyncStatus();
+  setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys}`, true);
+}
+
+function setProgress(percent){
+  els.uploadProgress.style.width = percent.toFixed(2) + '%';
 }
 
 function chunkArray(arr, size){
@@ -521,14 +564,31 @@ window.onmessage = (event) => {
     }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined }));
+      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined, remoteText: undefined, status: undefined }));
       renderTable();
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
       break;
     }
     case 'assigned-result': {
-      currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined }));
+      const incoming = Array.isArray(msg.items) ? msg.items : [];
+      const curMap = new Map(currentItems.map(it => [it.nodeId, it]));
+      for(const inc of incoming){
+        const existing = curMap.get(inc.nodeId);
+        if(existing){
+          existing.text = inc.text;
+          existing.name = inc.name;
+          existing.originalName = inc.originalName || existing.originalName;
+          existing.key = inc.key;
+          existing.namespace = inc.namespace;
+          existing.localKey = inc.localKey;
+          existing.existing = true;
+          // keep existing.selected as is (user choice)
+        } else {
+          curMap.set(inc.nodeId, { ...inc, selected: inc.selected !== false, synced: undefined, remoteText: undefined, status: undefined });
+        }
+      }
+      currentItems = Array.from(curMap.values());
       renderTable();
       scheduleStatusRefresh();
       break;
