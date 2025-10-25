@@ -55,6 +55,15 @@
   </fieldset>
 
   <fieldset>
+    <legend>Language</legend>
+    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
+      <label>Language<select id="languageSelect"></select></label>
+    </div>
+    <div class="small">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
+    <div class="small" id="nsListInfo" style="margin-top:4px;color:#444;"></div>
+  </fieldset>
+
+  <fieldset>
     <legend>Key management</legend>
     <div class="row-flex gap" style="align-items:flex-end; flex-wrap:wrap;">
       <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
@@ -88,15 +97,6 @@
       <button id="restoreNames" disabled>Restore names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
-  </fieldset>
-
-  <fieldset>
-    <legend>Language</legend>
-    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
-      <label>Language<select id="languageSelect"></select></label>
-    </div>
-    <div class="small">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
-    <div class="small" id="nsListInfo" style="margin-top:4px;color:#444;"></div>
   </fieldset>
 
   <div class="status" id="status"></div>
@@ -289,7 +289,7 @@ els.saveSettings.addEventListener('click', async () => {
   els.saveSettings.disabled = false;
   if(ok){
     pm({ type: 'save-settings', settings: s });
-    if(!els.scanNamespace.value) els.scanNamespace.value = 'common';
+    if(!els.scanNamespace.value) els.scanNamespace.value = 'Common';
     fetchLanguagesList();
     pm({ type: 'get-namespaces' });
     scheduleStatusRefresh();
@@ -316,7 +316,7 @@ els.scanSelection.addEventListener('click', () => {
   }
   lastMode = 'scan';
   reflectMode();
-  const ns = (els.scanNamespace.value || 'common').trim();
+  const ns = (els.scanNamespace.value || 'Common').trim();
   pm({ type: 'scan-selection', namespace: ns });
 });
 
@@ -390,7 +390,8 @@ async function fetchLanguagesList(){
 }
 
 async function fetchTranslations(s, language, namespace){
-  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${namespace}`;
+  const ns = encodeURIComponent(namespace);
+  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${ns}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -398,36 +399,87 @@ async function fetchTranslations(s, language, namespace){
 
 async function uploadSelectedKeys(items, s){
   const baseLang = s.baseLanguage || 'en';
-  let done = 0; const total = items.length;
-  setStatus('Uploading keys...');
-  setProgress(0);
+  // group by namespace
+  const byNs = new Map();
   for(const it of items){
-    try {
-      const ns = it.namespace || 'common';
-      const local = it.localKey || it.key.replace(/^.*\./,'');
-      if(!ns || !local){ throw new Error('namespace/localKey are empty'); }
-      await putTranslation(s, baseLang, ns, local, it.text);
-      done++;
-      setProgress(done/total*100);
-      setStatus(`(${done}/${total}) ${ns}.${local} OK`, true);
-    } catch(e){
-      setStatus('Error for '+ (it.key||'?') +': '+ e.message, true);
+    const ns = (it.namespace || 'Common').trim();
+    const local = (it.localKey || (it.key||'').replace(/^.*\./,'')).trim();
+    if(!ns || !local){ setStatus('Skip item with empty namespace/localKey: '+ (it.key||'?'), true); continue; }
+    if(!byNs.has(ns)) byNs.set(ns, []);
+    byNs.get(ns).push({ key: local, value: String(it.text ?? '') });
+  }
+  const totalKeys = Array.from(byNs.values()).reduce((acc, arr) => acc + arr.length, 0);
+  if(totalKeys === 0){ setStatus('Nothing to upload'); return; }
+
+  setStatus('Uploading keys (bulk update)...');
+  
+  for(const [ns, entries] of byNs.entries()){
+    setStatus(`Namespace ${ns}: ${entries.length} key(s)` , true);
+    // chunk to 1000 keys per request
+    for(const chunk of chunkArray(entries, 1000)){
+      const payload = {};
+      for(const {key, value} of chunk){ payload[key] = value; }
+      try {
+        const resInfo = await updateTranslationsBatch(s, baseLang, ns, payload);
+        const note = resInfo.note ? ` (${resInfo.note})` : '';
+        setStatus(`✓ ${ns}: +${chunk.length} translations${note}`, true);
+      } catch(e){
+        setStatus(`✗ ${ns}: ${e && e.message ? e.message : e}`, true);
+      }
     }
   }
-  setStatus('Done. Uploaded: '+done+'/'+total, true);
+  setStatus(`Done. Uploaded.`, true);
 }
 
-function setProgress(pct){ els.uploadProgress.style.width = pct.toFixed(1)+'%'; }
+function chunkArray(arr, size){
+  const out = [];
+  for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i, i+size));
+  return out;
+}
 
-async function putTranslation(s, language, namespace, key, value){
-  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${namespace}/${encodeURIComponent(key)}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type':'application/json', 'Authorization': s.apiKey },
-    body: JSON.stringify({ value })
-  });
-  if(!res.ok){ throw new Error('HTTP '+res.status); }
-  return res.json();
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function fetchWithAuth(url, options, apiKey){
+  // Prefer Bearer as in docs, fallback to raw on 401/403
+  let res = await fetch(url, { ...options, headers: { ...(options.headers||{}), Authorization: `Bearer ${apiKey}` } });
+  if ((res.status === 401 || res.status === 403) && !String(apiKey||'').startsWith('Bearer ')){
+    res = await fetch(url, { ...options, headers: { ...(options.headers||{}), Authorization: apiKey } });
+  }
+  return res;
+}
+
+async function updateTranslationsBatch(s, language, namespace, body){
+  const ns = encodeURIComponent(namespace || 'Common');
+  const url = `https://api.locize.app/update/${s.projectId}/${s.version}/${language}/${ns}`;
+  const opts = {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+    body: JSON.stringify(body)
+  };
+
+  // retry on 429 with small backoff
+  const maxRetries = 2;
+  for(let attempt=0; attempt<=maxRetries; attempt++){
+    const res = await fetchWithAuth(url, opts, s.apiKey);
+    if(res.status === 429 && attempt < maxRetries){
+      await sleep(250 * (attempt+1));
+      continue;
+    }
+    if(res.status === 412){
+      // nothing changed, treat as success
+      return { ok: true, note: 'no changes' };
+    }
+    if(!res.ok){
+      let extra = '';
+      try { extra = await res.text(); } catch(_) {}
+      throw new Error(`HTTP ${res.status}${extra ? ': '+extra : ''}`);
+    }
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      try { return await res.json(); } catch(_) { return { ok: true }; }
+    }
+    return { ok: true };
+  }
 }
 
 function isObjectEmpty(obj){
@@ -461,7 +513,7 @@ window.onmessage = (event) => {
       els.apiKey.value = s.apiKey || '';
       els.version.value = s.version || 'latest';
       els.baseLanguage.value = s.baseLanguage || 'en';
-      if(!els.scanNamespace.value) els.scanNamespace.value = 'common';
+      if(!els.scanNamespace.value) els.scanNamespace.value = 'Common';
       fetchLanguagesList();
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
@@ -483,7 +535,7 @@ window.onmessage = (event) => {
     }
     case 'selection-change': {
       if(lastMode === 'scan') {
-        const ns = (els.scanNamespace.value || 'common').trim();
+        const ns = (els.scanNamespace.value || 'Common').trim();
         pm({ type: 'scan-selection', namespace: ns });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }

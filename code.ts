@@ -243,7 +243,7 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'scan-selection': {
-      const namespace: string = msg.namespace || 'common';
+      const namespace: string = msg.namespace || 'Common';
       const selection = figma.currentPage.selection;
       if (!selection.length) {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No selection' });
