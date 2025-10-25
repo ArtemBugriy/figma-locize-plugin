@@ -21,12 +21,66 @@ interface ScanItem {
   namespace: string; // namespace
   localKey: string; // key part without namespace
   existing: boolean;
+  selected?: boolean; // persisted UI selection state
 }
 
 interface TranslationMap { [key: string]: string; }
 
 const PLUGIN_KEY_KEY = 'locize:key';
 const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
+const SELECTION_STORAGE_KEY = 'locize:selected';
+
+// Helpers to persist selection state
+async function getSelectionMap(): Promise<Record<string, boolean>> {
+  const v = await figma.clientStorage.getAsync(SELECTION_STORAGE_KEY);
+  const map = (v as Record<string, boolean>) || {};
+  // Compact the map: keep only unchecked entries (false). Remove any truthy leftovers from previous versions.
+  let mutated = false;
+  for (const k of Object.keys(map)) {
+    if (map[k] !== false) {
+      delete map[k];
+      mutated = true;
+    }
+  }
+  if (mutated) {
+    await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
+  }
+  return map;
+}
+
+async function setSelection(nodeId: string, selected: boolean): Promise<void> {
+  const map = await getSelectionMap();
+  if (selected === false) {
+    // Persist only unchecked items to minimize storage
+    map[nodeId] = false;
+  } else {
+    // Remove entry when item is (re)selected to use default-checked behavior
+    if (nodeId in map) delete map[nodeId];
+  }
+  await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
+}
+
+async function setSelectionBulk(list: { nodeId: string; selected: boolean }[]): Promise<void> {
+  if (!Array.isArray(list) || !list.length) return;
+  const map = await getSelectionMap();
+  let mutated = false;
+  for (const it of list) {
+    if (it.selected === false) {
+      if (map[it.nodeId] !== false) {
+        map[it.nodeId] = false;
+        mutated = true;
+      }
+    } else {
+      if (it.nodeId in map) {
+        delete map[it.nodeId];
+        mutated = true;
+      }
+    }
+  }
+  if (mutated) {
+    await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
+  }
+}
 
 function slugify(str: string): string {
   return str
@@ -201,6 +255,13 @@ figma.ui.onmessage = async (msg) => {
         break;
       }
       const items = generateKeys(textNodes, namespace);
+      // merge persisted selection state
+      try {
+        const selMap = await getSelectionMap();
+        for (const it of items) {
+          it.selected = selMap[it.nodeId] !== false; // default true
+        }
+      } catch (e) { void e; }
       figma.ui.postMessage({ type: 'scan-result', items });
       break;
     }
@@ -237,6 +298,7 @@ figma.ui.onmessage = async (msg) => {
       const namespace: string = msg.namespace || '';
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
+      const selMap = await getSelectionMap();
       const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
         const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
         const dotIndex = fullKey.indexOf('.');
@@ -244,13 +306,14 @@ figma.ui.onmessage = async (msg) => {
         const local = dotIndex > -1 ? fullKey.slice(dotIndex + 1) : fullKey;
         return {
           nodeId: n.id,
-            name: n.name,
-            originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
-            text: n.characters,
-            key: fullKey,
-            namespace: ns,
-            localKey: local,
-            existing: true,
+          name: n.name,
+          originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
+          text: n.characters,
+          key: fullKey,
+          namespace: ns,
+          localKey: local,
+          existing: true,
+          selected: selMap[n.id] !== false,
         };
       }).filter(i => !namespace || i.key.startsWith(namespace + '.'));
       figma.ui.postMessage({ type: 'assigned-result', items });
@@ -276,6 +339,7 @@ figma.ui.onmessage = async (msg) => {
       figma.notify('Names restored');
       const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
       const textNodes = collectTextNodes(sourceNodes);
+      const selMap = await getSelectionMap();
       const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
         const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
         const dotIndex = fullKey.indexOf('.');
@@ -290,6 +354,7 @@ figma.ui.onmessage = async (msg) => {
           namespace: ns,
           localKey: local,
           existing: true,
+          selected: selMap[n.id] !== false,
         };
       });
       figma.ui.postMessage({ type: 'assigned-result', items: itemsOut });
@@ -298,6 +363,17 @@ figma.ui.onmessage = async (msg) => {
     }
     case 'get-namespaces': {
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      break;
+    }
+    case 'set-selected': {
+      const nodeId: string = msg.nodeId;
+      const selected: boolean = !!msg.selected;
+      await setSelection(nodeId, selected);
+      break;
+    }
+    case 'set-selected-bulk': {
+      const list: { nodeId: string; selected: boolean }[] = Array.isArray(msg.list) ? msg.list : [];
+      await setSelectionBulk(list);
       break;
     }
     case 'notify': {
