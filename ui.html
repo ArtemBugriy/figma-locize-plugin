@@ -35,7 +35,10 @@
   .nowrap { white-space: nowrap; }
   #keys-container { max-height: 600px; overflow: auto; }
   #uploadProgress { width: 100%; height: 4px; background: #eee; margin-top:4px; position: relative; }
-  #uploadProgress span { position:absolute; top:0; left:0; height:100%; background:#4a8cff; width:0%; transition: width .2s; }
+  #uploadProgress span { position:absolute; top:0; left:0; height:100%; background:#4a8cff; width:0; transition: width .2s; }
+  /* Active mode styling for Scan selection button */
+  #scanSelection.active { background: #4a8cff; color: #fff; border-color: #4a8cff; }
+  #scanSelection.active:hover { background: #3a74d1; }
 </style>
 </head>
 <body>
@@ -55,7 +58,9 @@
     <legend>Key management</legend>
     <div class="row-flex gap" style="align-items:flex-end; flex-wrap:wrap;">
       <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
-      <button id="scanSelection">Scan selection</button>
+      <div class="row-flex" style="align-items:center; gap:6px;">
+        <button id="scanSelection">Scan selection</button>
+      </div>
       <label style="flex-direction:row; align-items:center; gap:6px; margin:0;">
         <input id="hideUnchecked" type="checkbox" />
         <span>Hide unchecked</span>
@@ -66,7 +71,7 @@
       <table id="keysTable">
         <thead>
           <tr>
-            <th><input type="checkbox" id="selectAll" /></th>
+            <th><input type="checkbox" id="selectAll" aria-label="Select all" /></th>
             <th>Namespace</th>
             <th>Key</th>
             <th>Text</th>
@@ -303,7 +308,14 @@ function collectSettings(){
 }
 
 els.scanSelection.addEventListener('click', () => {
+  if (lastMode === 'scan') {
+    lastMode = null;
+    reflectMode();
+    setStatus('Scan mode off');
+    return;
+  }
   lastMode = 'scan';
+  reflectMode();
   const ns = (els.scanNamespace.value || 'common').trim();
   pm({ type: 'scan-selection', namespace: ns });
 });
@@ -490,6 +502,16 @@ function updateNamespaces(list){
   detectedNamespaces = Array.isArray(list) ? list : [];
   els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'No namespaces found';
 }
+
+// Reflect current mode to UI (active state for Scan selection)
+function reflectMode(){
+  const isScan = lastMode === 'scan';
+  els.scanSelection.classList.toggle('active', isScan);
+  els.scanSelection.setAttribute('aria-pressed', isScan ? 'true' : 'false');
+}
+
+// Initial reflect
+reflectMode();
 </script>
 </body>
 </html>
