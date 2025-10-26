@@ -124,7 +124,7 @@ const els = {
   hideUnchecked: document.getElementById('hideUnchecked'),
 };
 
-let currentItems = []; // {nodeId,name,text,key,namespace,localKey,selected,synced}
+let currentItems = [];
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
@@ -133,7 +133,7 @@ let currentLanguage = '';
 let verifyController = null; // AbortController | null
 let verifySeq = 0;
 
-// Cache of base language dictionaries: { [ns]: Set(flatKeys) }
+// Cache of translations by language and namespace: { [language]: { [ns]: flatMap } }
 const remoteCache = {};
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
@@ -211,23 +211,6 @@ function updateButtons(){
   els.restoreNames.disabled = !currentItems.length;
 }
 
-// Flatten dictionary into a set of keys
-function flattenKeys(obj){
-  const out = new Set();
-  const stack = [[obj, '']];
-  while(stack.length){
-    const [cur, pref] = stack.pop();
-    if(cur && typeof cur === 'object'){
-      for(const k of Object.keys(cur)){
-        const v = cur[k];
-        const p = pref ? pref + '.' + k : k;
-        if(v && typeof v === 'object') stack.push([v, p]); else out.add(p);
-      }
-    }
-  }
-  return out;
-}
-
 // New: flatten nested dict to flat map of key -> value
 function flattenToMap(obj){
   const out = {};
@@ -260,36 +243,66 @@ async function refreshSyncStatus(){
   const nsSet = Array.from(new Set(currentItems.map(i => (i.namespace||'').trim()).filter(Boolean)));
   if(!nsSet.length){ currentItems.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderTable(); return; }
   try {
-    // Ensure cache for each ns (for currentLanguage)
+    const baseLang = s.baseLanguage || 'en';
+    // Ensure cache for required namespaces for current and base languages
     for(const ns of nsSet){
-      if(!remoteCache[ns]){
+      if(!remoteCache[currentLanguage]) remoteCache[currentLanguage] = {};
+      if(!remoteCache[currentLanguage][ns]){
         const data = await fetchTranslations(s, currentLanguage, ns);
-        remoteCache[ns] = flattenToMap(data);
+        remoteCache[currentLanguage][ns] = flattenToMap(data);
+      }
+      if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
+      if(!remoteCache[baseLang][ns]){
+        const baseData = await fetchTranslations(s, baseLang, ns);
+        remoteCache[baseLang][ns] = flattenToMap(baseData);
       }
     }
-    // Update items synced state using currentLanguage translations
+    // Update items synced state using currentLanguage and baseLanguage translations
     currentItems.forEach(item => {
       const ns = (item.namespace||'').trim();
       const lk = (item.localKey||'').trim();
       if(!ns || !lk){ item.synced = undefined; item.remoteText = undefined; item.status = undefined; return; }
-      const map = remoteCache[ns] || {};
-      const hasRemote = Object.prototype.hasOwnProperty.call(map, lk);
-      const remote = hasRemote ? map[lk] : undefined;
+      const curMap = (remoteCache[currentLanguage] || {})[ns] || {};
+      const baseMap = (remoteCache[s.baseLanguage || 'en'] || {})[ns] || {};
+      const hasRemote = Object.prototype.hasOwnProperty.call(curMap, lk);
+      const hasBase = Object.prototype.hasOwnProperty.call(baseMap, lk);
+      const remote = hasRemote ? curMap[lk] : undefined;
       item.remoteText = remote;
       const local = String(item.text ?? '');
-      if(!hasRemote){
-        item.status = 'missing';
-        item.synced = false;
-      } else {
-        const remoteStr = String(remote ?? '');
-        const equal = local === remoteStr;
-        const remoteEmpty = remoteStr === '';
-        if(remoteEmpty || !equal){
+
+      if(currentLanguage !== (s.baseLanguage || 'en')){
+        if(!hasBase && !hasRemote){
+          item.status = 'missing';
+          item.synced = false;
+        } else if(hasBase && !hasRemote){
           item.status = 'unsynced';
           item.synced = false;
         } else {
-          item.status = 'synced';
-          item.synced = true;
+          const remoteStr = String(remote ?? '');
+          const equal = local === remoteStr;
+          if(remoteStr === '' || !equal){
+            item.status = 'unsynced';
+            item.synced = false;
+          } else {
+            item.status = 'synced';
+            item.synced = true;
+          }
+        }
+      } else {
+        // current language is base language
+        if(!hasRemote){
+          item.status = 'missing';
+          item.synced = false;
+        } else {
+          const remoteStr = String(remote ?? '');
+          const equal = local === remoteStr;
+          if(remoteStr === '' || !equal){
+            item.status = 'unsynced';
+            item.synced = false;
+          } else {
+            item.status = 'synced';
+            item.synced = true;
+          }
         }
       }
     });
@@ -363,7 +376,8 @@ els.uploadKeys.addEventListener('click', async () => {
   const s = collectSettings();
   if(!validateSettings(s)) return;
   await uploadSelectedKeys(sel, s);
-  for(const ns of Object.keys(remoteCache)) delete remoteCache[ns];
+  // Invalidate all caches (both languages)
+  for(const k in remoteCache) delete remoteCache[k];
   await refreshSyncStatus();
 });
 
@@ -380,15 +394,24 @@ els.languageSelect.addEventListener('change', async () => {
   if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
   setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
-  // clear cache for new language
-  for(const k of Object.keys(remoteCache)) delete remoteCache[k];
+  // clear caches for new selection
+  for(const k in remoteCache) delete remoteCache[k];
+  const baseLang = s.baseLanguage || 'en';
   for(const ns of detectedNamespaces){
     try {
       setStatus('→ '+ns+' ...', true);
       const translations = await fetchTranslations(s, lang, ns);
       const flatMap = flattenToMap(translations);
-      remoteCache[ns] = flatMap;
+      if(!remoteCache[lang]) remoteCache[lang] = {};
+      remoteCache[lang][ns] = flatMap;
       pm({ type: 'apply-language', map: flatMap, namespace: ns });
+      // Preload base language for status checks if different
+      if(baseLang !== lang){
+        const baseTranslations = await fetchTranslations(s, baseLang, ns);
+        const baseFlat = flattenToMap(baseTranslations);
+        if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
+        remoteCache[baseLang][ns] = baseFlat;
+      }
       setStatus('✓ '+ns, true);
     } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
   }
@@ -465,7 +488,7 @@ async function uploadSelectedKeys(items, s){
     }
   }
   // Invalidate and refresh cache for current language
-  for(const k of Object.keys(remoteCache)) delete remoteCache[k];
+  for(const k in remoteCache) delete remoteCache[k];
   await refreshSyncStatus();
   setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys}`, true);
 }
