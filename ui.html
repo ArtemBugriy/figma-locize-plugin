@@ -96,6 +96,10 @@
     <div class="actions" style="margin-top:6px;">
       <button id="applyKeys" disabled>Apply keys to nodes</button>
       <button id="uploadKeys" disabled>Upload to locize</button>
+      <label style="flex-direction:row; align-items:center; gap:6px; margin:0;" title="Available only for base language">
+        <input id="autotranslate" type="checkbox" />
+        <span>Autotranslate</span>
+      </label>
       <button id="restoreNames" disabled>Restore names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
@@ -122,6 +126,7 @@ const els = {
   restoreNames: document.getElementById('restoreNames'),
   nsListInfo: document.getElementById('nsListInfo'),
   hideUnchecked: document.getElementById('hideUnchecked'),
+  autotranslate: document.getElementById('autotranslate'),
 };
 
 let currentItems = [];
@@ -138,6 +143,20 @@ const remoteCache = {};
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
+
+// Enable/disable autotranslate checkbox depending on selected vs base language
+function updateAutotranslateAvailability(){
+  const s = collectSettings();
+  const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  const isBase = lang === (s.baseLanguage || 'en');
+  if (els.autotranslate) {
+    els.autotranslate.disabled = !isBase;
+    // small UX hint via title and slight opacity on label
+    const label = els.autotranslate.closest('label');
+    if(label) label.style.opacity = isBase ? '' : '0.6';
+    els.autotranslate.title = isBase ? '' : 'Works only for base language';
+  }
+}
 
 function renderTable(){
   els.tableBody.innerHTML = '';
@@ -332,6 +351,7 @@ els.saveSettings.addEventListener('click', async () => {
     fetchLanguagesList();
     pm({ type: 'get-namespaces' });
     scheduleStatusRefresh();
+    updateAutotranslateAvailability();
   } else {
     pm({ type:'notify', message:'Invalid Locize credentials' });
   }
@@ -391,6 +411,7 @@ els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
   const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
   currentLanguage = lang;
+  updateAutotranslateAvailability();
   if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
   setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
@@ -442,6 +463,7 @@ async function fetchLanguagesList(){
     const langs = Object.keys(data);
     els.languageSelect.innerHTML = langs.map(l => `<option value="${l}">${l}</option>`).join('');
     if(s.baseLanguage && !els.languageSelect.value) els.languageSelect.value = s.baseLanguage;
+    updateAutotranslateAvailability();
   } catch(e){ setStatus('Failed to load languages: '+ e.message); }
 }
 
@@ -455,6 +477,8 @@ async function fetchTranslations(s, language, namespace){
 
 async function uploadSelectedKeys(items, s){
   const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  const isBase = lang === (s.baseLanguage || 'en');
+  const doAutotranslate = isBase && !!(els.autotranslate && els.autotranslate.checked);
   // group by namespace
   const byNs = new Map();
   for(const it of items){
@@ -467,7 +491,7 @@ async function uploadSelectedKeys(items, s){
   const totalKeys = Array.from(byNs.values()).reduce((acc, arr) => acc + arr.length, 0);
   if(totalKeys === 0){ setStatus('Nothing to upload'); return; }
 
-  setStatus(`Uploading keys to ${lang} (bulk update)...`);
+  setStatus(`Uploading keys to ${lang} (bulk update)${doAutotranslate ? ' [autotranslate]' : ''}...`);
   let sentKeys = 0;
   setProgress(0);
   for(const [ns, entries] of byNs.entries()){
@@ -477,10 +501,10 @@ async function uploadSelectedKeys(items, s){
       const payload = {};
       for(const {key, value} of chunk){ payload[key] = value; }
       try {
-        const resInfo = await updateTranslationsBatch(s, lang, ns, payload);
+        const resInfo = await updateTranslationsBatch(s, lang, ns, payload, doAutotranslate);
         sentKeys += chunk.length;
         setProgress(sentKeys/totalKeys*100);
-        const note = resInfo.note ? ` (${resInfo.note})` : '';
+        const note = resInfo?.note ? ` (${resInfo.note})` : '';
         setStatus(`✓ ${ns}: +${chunk.length} translations${note}`, true);
       } catch(e){
         setStatus(`✗ ${ns}: ${e && e.message ? e.message : e}`, true);
@@ -514,9 +538,10 @@ async function fetchWithAuth(url, options, apiKey){
   return res;
 }
 
-async function updateTranslationsBatch(s, language, namespace, body){
+async function updateTranslationsBatch(s, language, namespace, body, autotranslate=false){
   const ns = encodeURIComponent(namespace || 'Common');
-  const url = `https://api.locize.app/update/${s.projectId}/${s.version}/${language}/${ns}`;
+  const q = autotranslate ? '?autotranslate=true' : '';
+  const url = `https://api.locize.app/update/${s.projectId}/${s.version}/${language}/${ns}${q}`;
   const opts = {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
@@ -583,6 +608,7 @@ window.onmessage = (event) => {
       fetchLanguagesList();
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
+      updateAutotranslateAvailability();
       break;
     }
     case 'scan-result': {
