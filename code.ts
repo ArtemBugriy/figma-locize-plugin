@@ -385,5 +385,20 @@ figma.ui.onmessage = async (msg) => {
       figma.closePlugin();
       break;
     }
+    case 'update-text': {
+      const nodeId: string = msg.nodeId;
+      const text: string = String(msg.text ?? '');
+      try {
+        const node = await figma.getNodeByIdAsync(nodeId);
+        if (node && node.type === 'TEXT') {
+          const tn = node as TextNode;
+          await ensureFonts([tn]);
+          tn.characters = text;
+        }
+      } catch (e) {
+        console.log('update-text failed', e);
+      }
+      break;
+    }
   }
 };

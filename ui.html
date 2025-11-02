@@ -90,8 +90,8 @@
             <th><input type="checkbox" id="selectAll" aria-label="Select all" /></th>
             <th>Namespace</th>
             <th>Key</th>
-            <th>Text</th>
-            <th>Remote Text</th>
+            <th style="min-width: 150px;">Text</th>
+            <th style="min-width: 150px;">Remote Text</th>
             <th>Suggestions</th>
             <th>Original name</th>
             <th>Status</th>
@@ -206,7 +206,48 @@ function renderTable(){
     tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
-    tdText.textContent = item.text ?? '';
+    // Editable text with debounce sync to node (contenteditable)
+    const textDiv = document.createElement('div');
+    textDiv.contentEditable = 'true';
+    textDiv.textContent = item.text ?? '';
+    textDiv.style.width = '100%';
+    textDiv.style.boxSizing = 'border-box';
+    textDiv.style.minHeight = '22px';
+    textDiv.style.whiteSpace = 'pre-wrap';
+    textDiv.style.wordBreak = 'break-word';
+    textDiv.style.outline = 'none';
+    textDiv.addEventListener('input', () => {
+      // innerText preserves newlines as \n for contenteditable
+      item.text = textDiv.innerText;
+      scheduleStatusRefresh();
+      scheduleNodeTextUpdate(item.nodeId, item.text);
+      scheduleSuggestionsRefresh();
+    });
+    textDiv.addEventListener('blur', () => {
+      // Flush immediately on blur
+      scheduleNodeTextUpdate(item.nodeId, textDiv.innerText, true);
+    });
+    // Paste as plain text only
+    textDiv.addEventListener('paste', (e) => {
+      try {
+        e.preventDefault();
+      } catch(_) {}
+      const pe = e;
+      const txt = (pe.clipboardData && pe.clipboardData.getData('text/plain')) || '';
+      // execCommand is deprecated, but supported in plugin iframe environment
+      try { document.execCommand('insertText', false, txt); }
+      catch(_) {
+        // Fallback: replace content
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          sel.deleteFromDocument();
+          sel.getRangeAt(0).insertNode(document.createTextNode(txt));
+        } else {
+          textDiv.textContent = (textDiv.textContent || '') + txt;
+        }
+      }
+    });
+    tdText.appendChild(textDiv);
 
     const tdRemote = document.createElement('td');
     tdRemote.textContent = item.remoteText ?? '';
@@ -878,6 +919,21 @@ els.suggestKeys?.addEventListener('click', async () => {
 
 // Initial reflect
 reflectMode();
+
+// Debounced node text updates
+const textUpdateTimers = new Map(); // nodeId -> timeout id
+function scheduleNodeTextUpdate(nodeId, text, flush=false){
+  const key = String(nodeId);
+  if (textUpdateTimers.has(key)){
+    clearTimeout(textUpdateTimers.get(key));
+    textUpdateTimers.delete(key);
+  }
+  const send = () => { pm({ type: 'update-text', nodeId: key, text: String(text ?? '') }); };
+  if (flush){ send(); return; }
+  const t = setTimeout(send, 300);
+  textUpdateTimers.set(key, t);
+}
+
 </script>
 </body>
 </html>
