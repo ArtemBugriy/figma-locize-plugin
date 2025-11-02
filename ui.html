@@ -79,6 +79,8 @@
         <input id="suggestNamespaces" type="text" placeholder="Common, Landing, Auth" />
       </label>
       <button id="suggestKeys">Suggest keys</button>
+      <!-- New: Apply all top suggestions button -->
+      <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
     </div>
     <div class="small" style="margin: 6px 0;">Keys are generated based on hierarchy and layer/text name.</div>
     <div id="keys-container">
@@ -134,6 +136,8 @@ const els = {
   autotranslate: document.getElementById('autotranslate'),
   suggestNamespaces: document.getElementById('suggestNamespaces'),
   suggestKeys: document.getElementById('suggestKeys'),
+  // New: bulk apply top suggestions button
+  applyTopSuggestions: document.getElementById('applyTopSuggestions'),
 };
 
 let currentItems = [];
@@ -267,6 +271,8 @@ function updateButtons(){
   els.applyKeys.disabled = !anySelected;
   els.uploadKeys.disabled = !anySelected;
   els.restoreNames.disabled = !currentItems.length;
+  // New: enable bulk apply if we have any items
+  if (els.applyTopSuggestions) els.applyTopSuggestions.disabled = !currentItems.length;
 }
 
 // New: flatten nested dict to flat map of key -> value
@@ -476,7 +482,7 @@ function buildSuggestionPool(language, namespaces){
   for(const ns of namespaces){
     const flat = ((remoteCache[language]||{})[ns]) || {};
     for(const key of Object.keys(flat)){
-      const val = String(flat[key] ?? '');
+      const val = String(flat[key] || '');
       if(!val) continue;
       const norm = normalizeVal(val);
       const tokens = norm.split(' ');
@@ -614,6 +620,30 @@ els.restoreNames.addEventListener('click', () => {
   const targets = selected.length ? selected : currentItems;
   pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
   setStatus('Restoring names...');
+});
+
+// New: apply all top suggestions (selected rows, or all if none selected)
+els.applyTopSuggestions?.addEventListener('click', async () => {
+  await updateSuggestionsForCurrent();
+  const selected = currentItems.filter(i => i.selected !== false);
+  const targets = selected.length ? selected : currentItems;
+  let applied = 0, skipped = 0;
+  for(const item of targets){
+    const sug = Array.isArray(item.suggestions) && item.suggestions[0];
+    if(sug){
+      item.namespace = sug.namespace;
+      item.localKey = sug.key;
+      recomputeKey(item);
+      // keep selected on, do not auto-apply to nodes
+      item.selected = item.selected !== false;
+      applied++;
+    } else {
+      skipped++;
+    }
+  }
+  renderTable();
+  scheduleStatusRefresh();
+  setStatus(`Applied top suggestions: ${applied}${skipped ? `, skipped: ${skipped}` : ''}`);
 });
 
 function validateSettings(s){
