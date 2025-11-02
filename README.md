@@ -38,3 +38,23 @@ We recommend writing TypeScript code using Visual Studio code:
     you reopen Visual Studio Code.
 
 That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
+
+---
+
+Fuzzy suggestions for keys
+
+- Where: UI table, column "Suggestions".
+- How it works: The plugin fetches translations from Locize for the namespaces you list in the input "Suggest from namespaces". It builds a fuzzy index from both values and full keys (ns.key).
+- Matching: Suggestions are ranked by a combined score of similarity to node text and the edited key. Minor typos/case/diacritics are tolerated.
+- Live updates: As you type in the Key field, suggestions refresh automatically (debounced).
+- Usage:
+  1) Fill Settings and save; select a Language.
+  2) In "Key management", set "Suggest from namespaces" (comma-separated), e.g. `Common, Auth`.
+  3) Click "Suggest keys" or just edit the Key — suggestions will appear per row.
+  4) Pick a suggestion and press "Apply" to set namespace.key for that row.
+
+Notes
+
+- Network access must allow https://api.locize.app (already configured in manifest.json).
+- Only items with text will receive suggestions; empty text yields no suggestions.
+- If no namespaces are provided, suggestions are disabled.

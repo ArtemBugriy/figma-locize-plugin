@@ -147,8 +147,8 @@ let verifySeq = 0;
 
 // Cache of translations by language and namespace: { [language]: { [ns]: flatMap } }
 const remoteCache = {};
-// Inverted value index for suggestions: { [language]: { [ns]: { [normalizedValue]: string[] (keys) } } }
-const valueIndex = {};
+// Suggestion candidates pool by language
+const suggestionPool = {};
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
@@ -160,7 +160,6 @@ function updateAutotranslateAvailability(){
   const isBase = lang === (s.baseLanguage || 'en');
   if (els.autotranslate) {
     els.autotranslate.disabled = !isBase;
-    // small UX hint via title and slight opacity on label
     const label = els.autotranslate.closest('label');
     if(label) label.style.opacity = isBase ? '' : '0.6';
     els.autotranslate.title = isBase ? '' : 'Works only for base language';
@@ -199,7 +198,7 @@ function renderTable(){
     keyInput.type = 'text';
     keyInput.value = item.localKey || '';
     keyInput.className = 'key-input';
-    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); });
+    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); scheduleSuggestionsRefresh(); });
     tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
@@ -214,7 +213,9 @@ function renderTable(){
       item.suggestions.forEach((sug, idx) => {
         const opt = document.createElement('option');
         opt.value = `${sug.namespace}.${sug.key}`;
-        opt.textContent = `${sug.namespace}.${sug.key}`;
+        // Показываем превью значения, чтобы удобнее выбирать
+        const preview = (sug.value || '').replace(/\s+/g,' ').slice(0,60);
+        opt.textContent = `${sug.namespace}.${sug.key}${preview ? ' — '+preview : ''}`;
         if(idx===0) opt.selected = true;
         select.appendChild(opt);
       });
@@ -226,7 +227,7 @@ function renderTable(){
         const ns = dot>-1 ? val.slice(0,dot) : '';
         const lk = dot>-1 ? val.slice(dot+1) : val;
         item.namespace = ns; item.localKey = lk; recomputeKey(item);
-        // keep selected on
+        // keep selected on, do not auto-apply to nodes
         item.selected = item.selected !== false;
         renderTable();
         scheduleStatusRefresh();
@@ -445,6 +446,133 @@ els.selectAll.addEventListener('change', () => {
   renderTable();
 });
 
+// Parse comma separated namespaces
+function parseSuggestNamespaces(){
+  const raw = (els.suggestNamespaces?.value || '').trim();
+  if(!raw) return [];
+  return raw.split(',').map(s=>s.trim()).filter(Boolean);
+}
+
+// Normalize string for fuzzy
+function normalizeVal(v){
+  return String(v ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Доп. нормализация для ключей (ns.key) и разбиение на токены
+function normalizeKey(k){
+  const s = String(k ?? '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2') // split camelCase
+    .replace(/[._-]+/g, ' ');
+  return normalizeVal(s);
+}
+
+// Build candidates pool for language+namespaces
+function buildSuggestionPool(language, namespaces){
+  const pool = [];
+  for(const ns of namespaces){
+    const flat = ((remoteCache[language]||{})[ns]) || {};
+    for(const key of Object.keys(flat)){
+      const val = String(flat[key] ?? '');
+      if(!val) continue;
+      const norm = normalizeVal(val);
+      const tokens = norm.split(' ');
+      const fullKey = `${ns}.${key}`;
+      const normKey = normalizeKey(fullKey);
+      const keyTokens = normKey.split(' ');
+      pool.push({ namespace: ns, key, value: val, norm, tokens, fullKey, normKey, keyTokens });
+    }
+  }
+  suggestionPool[language] = pool;
+}
+
+// Ensure dictionaries for suggestion namespaces are loaded, then build pool
+async function ensureSuggestNamespacesLoaded(s, language, namespaces){
+  if(!remoteCache[language]) remoteCache[language] = {};
+  for(const ns of namespaces){
+    if(!remoteCache[language][ns]){
+      try {
+        const translations = await fetchTranslations(s, language, ns);
+        remoteCache[language][ns] = flattenToMap(translations);
+      } catch(e){ setStatus(`Suggest preload failed for ${ns}: ${e && e.message ? e.message : e}`, true); }
+    }
+  }
+  buildSuggestionPool(language, namespaces);
+}
+
+// Базовый скоринг между нормализованной строкой запроса и нормализованным кандидатом
+function baseFuzzyScore(queryNorm, candNorm, candTokens){
+  if(!queryNorm || !candNorm) return 0;
+  if(queryNorm === candNorm) return 1.0;
+  let score = 0;
+  // substring based
+  if(candNorm.includes(queryNorm)){
+    const ratio = Math.min(1, queryNorm.length / Math.max(1, candNorm.length));
+    score = Math.max(score, 0.85 * ratio);
+  }
+  if(queryNorm.includes(candNorm)){
+    const ratio = Math.min(1, candNorm.length / Math.max(1, queryNorm.length));
+    score = Math.max(score, 0.75 * ratio);
+  }
+  // token overlap
+  const qTokens = queryNorm.split(' ');
+  const setQ = new Set(qTokens);
+  let overlap = 0;
+  for(const t of candTokens){ if(setQ.has(t)) overlap++; }
+  if(qTokens.length){
+    const tokenRatio = overlap / Math.max(qTokens.length, candTokens.length);
+    score = Math.max(score, 0.7 * tokenRatio);
+  }
+  return score;
+}
+
+// Вычисление комбинированного скоринга: по тексту и по ключу
+function combinedScore(valueQueryNorm, keyQueryNorm, cand){
+  const sVal = baseFuzzyScore(valueQueryNorm, cand.norm, cand.tokens);
+  const sKey = baseFuzzyScore(keyQueryNorm, cand.normKey, cand.keyTokens);
+  // Небольшой бонус, если namespace совпадает с выбранным у айтема
+  return Math.max(sVal, sKey * 0.95);
+}
+
+// Compute suggestions for each item
+function suggestForItems(language, namespaces, limit=5, threshold=0.3){
+  const pool = suggestionPool[language] || [];
+  for(const item of currentItems){
+    const valueQuery = normalizeVal(item.text);
+    const keyQuery = normalizeKey(item.localKey || '');
+    const list = [];
+    if(valueQuery || keyQuery){
+      for(const cand of pool){
+        const s = combinedScore(valueQuery, keyQuery, cand);
+        if(s >= threshold){ list.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s }); }
+      }
+      list.sort((a,b)=> b.score - a.score);
+      item.suggestions = list.slice(0, limit);
+    } else {
+      item.suggestions = [];
+    }
+  }
+}
+
+let suggestionsRefreshTimer = null;
+function scheduleSuggestionsRefresh(){
+  clearTimeout(suggestionsRefreshTimer);
+  suggestionsRefreshTimer = setTimeout(() => { updateSuggestionsForCurrent(); }, 250);
+}
+
+async function updateSuggestionsForCurrent(){
+  const s = collectSettings();
+  const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  const nsList = parseSuggestNamespaces();
+  if(!nsList.length){ currentItems.forEach(i => i.suggestions = []); renderTable(); return; }
+  await ensureSuggestNamespacesLoaded(s, lang, nsList);
+  suggestForItems(lang, nsList);
+  renderTable();
+}
+
 els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
   const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
@@ -464,7 +592,6 @@ els.languageSelect.addEventListener('change', async () => {
       if(!remoteCache[lang]) remoteCache[lang] = {};
       remoteCache[lang][ns] = flatMap;
       pm({ type: 'apply-language', map: flatMap, namespace: ns });
-      // Preload base language for status checks if different
       if(baseLang !== lang){
         const baseTranslations = await fetchTranslations(s, baseLang, ns);
         const baseFlat = flattenToMap(baseTranslations);
@@ -474,20 +601,12 @@ els.languageSelect.addEventListener('change', async () => {
       setStatus('✓ '+ns, true);
     } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
   }
-  // If suggestion namespaces provided, preload and suggest
-  const suggNs = parseSuggestNamespaces();
-  if(suggNs.length){
-    await ensureSuggestNamespacesLoaded(s, lang, suggNs);
-    suggestForItems(lang, suggNs);
-  } else {
-    // clear suggestions if none specified
-    currentItems.forEach(i => { i.suggestions = []; });
-  }
   // Ask Figma to return current assigned items (to refresh node texts)
   pm({ type: 'get-assigned' });
   await refreshSyncStatus();
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
-  renderTable();
+  // update suggestions if namespaces provided
+  updateSuggestionsForCurrent();
 });
 
 els.restoreNames.addEventListener('click', () => {
@@ -627,7 +746,6 @@ function isObjectEmpty(obj){
 }
 
 async function verifyCredentials(s, signal, seq){
-  // Basic validation already done before
   const isCurrent = () => seq === verifySeq;
   if(isCurrent()) setStatus('Verifying credentials...');
   try {
@@ -665,19 +783,8 @@ window.onmessage = (event) => {
       renderTable();
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
-      // Auto-suggest if namespaces provided
-      (async () => {
-        const s = collectSettings();
-        const lang = els.languageSelect.value || s.baseLanguage || 'en';
-        const nsList = parseSuggestNamespaces();
-        if(nsList.length){
-          await ensureSuggestNamespacesLoaded(s, lang, nsList);
-          suggestForItems(lang, nsList);
-          renderTable();
-        } else {
-          currentItems.forEach(i => { i.suggestions = []; });
-        }
-      })();
+      // update suggestions if namespaces provided
+      updateSuggestionsForCurrent();
       break;
     }
     case 'assigned-result': {
@@ -693,7 +800,6 @@ window.onmessage = (event) => {
           existing.namespace = inc.namespace;
           existing.localKey = inc.localKey;
           existing.existing = true;
-          // keep existing.selected as is (user choice)
         } else {
           curMap.set(inc.nodeId, { ...inc, selected: inc.selected !== false, synced: undefined, remoteText: undefined, status: undefined });
         }
@@ -701,19 +807,8 @@ window.onmessage = (event) => {
       currentItems = Array.from(curMap.values());
       renderTable();
       scheduleStatusRefresh();
-      // Auto-suggest if namespaces provided
-      (async () => {
-        const s = collectSettings();
-        const lang = els.languageSelect.value || s.baseLanguage || 'en';
-        const nsList = parseSuggestNamespaces();
-        if(nsList.length){
-          await ensureSuggestNamespacesLoaded(s, lang, nsList);
-          suggestForItems(lang, nsList);
-          renderTable();
-        } else {
-          currentItems.forEach(i => { i.suggestions = []; });
-        }
-      })();
+      // update suggestions if namespaces provided
+      updateSuggestionsForCurrent();
       break;
     }
     case 'selection-change': {
@@ -745,71 +840,14 @@ function reflectMode(){
   els.scanSelection.setAttribute('aria-pressed', isScan ? 'true' : 'false');
 }
 
-// Initial reflect
-reflectMode();
-
-function parseSuggestNamespaces(){
-  const raw = (els.suggestNamespaces?.value || '').trim();
-  if(!raw) return [];
-  return raw.split(',').map(s=>s.trim()).filter(Boolean);
-}
-
-function normalizeVal(v){ return String(v ?? '').trim(); }
-
-async function ensureSuggestNamespacesLoaded(s, language, namespaces){
-  if(!remoteCache[language]) remoteCache[language] = {};
-  if(!valueIndex[language]) valueIndex[language] = {};
-  for(const ns of namespaces){
-    if(!remoteCache[language][ns]){
-      try {
-        const translations = await fetchTranslations(s, language, ns);
-        remoteCache[language][ns] = flattenToMap(translations);
-      } catch(e){ setStatus(`Suggest preload failed for ${ns}: ${e?.message||e}`, true); }
-    }
-    if(!valueIndex[language][ns]){
-      const flat = remoteCache[language][ns] || {};
-      const idx = {};
-      for(const k of Object.keys(flat)){
-        const val = normalizeVal(flat[k]);
-        if(!val) continue;
-        (idx[val] ||= []).push(k);
-      }
-      valueIndex[language][ns] = idx;
-    }
-  }
-}
-
-function suggestForItems(language, namespaces){
-  const byNsIdx = (valueIndex[language] || {});
-  for(const item of currentItems){
-    const local = normalizeVal(item.text);
-    const suggestions = [];
-    if(local){
-      for(const ns of namespaces){
-        const idx = byNsIdx[ns]; if(!idx) continue;
-        const keys = idx[local];
-        if(Array.isArray(keys)){
-          for(const key of keys){ suggestions.push({ namespace: ns, key, value: local }); }
-        }
-      }
-    }
-    // dedupe by ns+key
-    const uniq = new Map();
-    for(const s of suggestions){ uniq.set(`${s.namespace}.${s.key}`, s); }
-    item.suggestions = Array.from(uniq.values());
-  }
-}
-
+// trigger suggestions by button
 els.suggestKeys?.addEventListener('click', async () => {
-  const s = collectSettings();
-  const lang = els.languageSelect.value || s.baseLanguage || 'en';
-  const nsList = parseSuggestNamespaces();
-  if(!nsList.length){ setStatus('Enter namespaces for suggestions (comma separated)'); return; }
-  await ensureSuggestNamespacesLoaded(s, lang, nsList);
-  suggestForItems(lang, nsList);
-  renderTable();
+  await updateSuggestionsForCurrent();
   setStatus('Suggestions updated');
 });
+
+// Initial reflect
+reflectMode();
 </script>
 </body>
 </html>
