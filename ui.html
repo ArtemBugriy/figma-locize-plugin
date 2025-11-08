@@ -24,6 +24,7 @@
   tbody tr.synced td { background: #f0fff4; }
   tbody tr.unsynced td { background: #fff8db; }
   tbody tr.missing td { background: #fff7f7; }
+  tbody input { border: none; outline: none; background: transparent; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   button { cursor: pointer; padding: 4px 12px; font-size: 12px; }
   .row-flex { display: flex; gap: 8px; }
@@ -88,12 +89,12 @@
         <thead>
           <tr>
             <th><input type="checkbox" id="selectAll" aria-label="Select all" /></th>
-            <th>Namespace</th>
-            <th>Key</th>
-            <th style="min-width: 150px;">Text</th>
+            <th><small>✏️</small>&nbsp;Namespace</th>
+            <th><small>✏️</small>&nbsp;Key</th>
+            <th style="min-width: 150px;"><small>✏️</small>&nbsp;Text</th>
             <th style="min-width: 150px;">Remote Text</th>
             <th>Suggestions</th>
-            <th>Original name</th>
+            <th>Original Node Name</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -107,7 +108,7 @@
         <input id="autotranslate" type="checkbox" />
         <span>Autotranslate</span>
       </label>
-      <button id="restoreNames" disabled>Restore names</button>
+      <button id="restoreNames" disabled>Restore original node names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
   </fieldset>
@@ -153,6 +154,8 @@ let verifySeq = 0;
 const remoteCache = {};
 // Suggestion candidates pool by language
 const suggestionPool = {};
+// Max suggestions per item
+const SUGGESTIONS_MAX = 5;
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
@@ -194,7 +197,24 @@ function renderTable(){
     nsInput.type = 'text';
     nsInput.value = item.namespace || '';
     nsInput.style.width = '90px';
-    nsInput.addEventListener('input', () => { item.namespace = nsInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); });
+    // Сохраняем начальное значение на фокус
+    nsInput.addEventListener('focus', () => { nsInput.dataset.prev = item.namespace || ''; });
+    // Обновляем модель на ввод, но не триггерим перерасчёты/перерисовку
+    nsInput.addEventListener('input', () => { item.namespace = nsInput.value; /* no recompute/render here */ });
+    // Применяем изменения только на blur/Enter
+    const commitNs = () => {
+      const val = (nsInput.value || '').trim();
+      nsInput.value = val;
+      item.namespace = val;
+      recomputeKey(item);
+      scheduleStatusRefresh();
+      scheduleSuggestionsRefresh();
+    };
+    nsInput.addEventListener('blur', commitNs);
+    nsInput.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter'){ e.preventDefault(); nsInput.blur(); }
+      if(e.key === 'Escape'){ e.preventDefault(); nsInput.value = nsInput.dataset.prev || ''; nsInput.blur(); }
+    });
     tdNs.appendChild(nsInput);
 
     const tdKey = document.createElement('td');
@@ -202,11 +222,27 @@ function renderTable(){
     keyInput.type = 'text';
     keyInput.value = item.localKey || '';
     keyInput.className = 'key-input';
-    keyInput.addEventListener('input', () => { item.localKey = keyInput.value.trim(); recomputeKey(item); scheduleStatusRefresh(); scheduleSuggestionsRefresh(); });
+    // Сохраняем начальное значение на фокус
+    keyInput.addEventListener('focus', () => { keyInput.dataset.prev = item.localKey || ''; });
+    // Только локально обновляем модель
+    keyInput.addEventListener('input', () => { item.localKey = keyInput.value; /* no recompute/render here */ });
+    const commitKey = () => {
+      const val = (keyInput.value || '').trim();
+      keyInput.value = val;
+      item.localKey = val;
+      recomputeKey(item);
+      scheduleStatusRefresh();
+      scheduleSuggestionsRefresh();
+    };
+    keyInput.addEventListener('blur', commitKey);
+    keyInput.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter'){ e.preventDefault(); keyInput.blur(); }
+      if(e.key === 'Escape'){ e.preventDefault(); keyInput.value = keyInput.dataset.prev || ''; keyInput.blur(); }
+    });
     tdKey.appendChild(keyInput);
 
     const tdText = document.createElement('td');
-    // Editable text with debounce sync to node (contenteditable)
+    // Editable text with apply-on-blur sync to node (contenteditable)
     const textDiv = document.createElement('div');
     textDiv.contentEditable = 'true';
     textDiv.textContent = item.text ?? '';
@@ -217,15 +253,17 @@ function renderTable(){
     textDiv.style.wordBreak = 'break-word';
     textDiv.style.outline = 'none';
     textDiv.addEventListener('input', () => {
-      // innerText preserves newlines as \n for contenteditable
+      // Обновляем только локальное значение, без перерисовки/статуса во время набора
       item.text = textDiv.innerText;
-      scheduleStatusRefresh();
-      scheduleNodeTextUpdate(item.nodeId, item.text);
-      scheduleSuggestionsRefresh();
+      // Не отправляем в Figma и не обновляем статус/подсказки на каждый символ
     });
     textDiv.addEventListener('blur', () => {
-      // Flush immediately on blur
-      scheduleNodeTextUpdate(item.nodeId, textDiv.innerText, true);
+      // Применяем в Figma и обновляем статус/подсказки только при потере фокуса
+      const val = textDiv.innerText;
+      item.text = val;
+      pm({ type: 'update-text', nodeId: item.nodeId, text: val });
+      scheduleStatusRefresh();
+      scheduleSuggestionsRefresh();
     });
     // Paste as plain text only
     textDiv.addEventListener('paste', (e) => {
@@ -597,7 +635,8 @@ function suggestForItems(language, namespaces, limit=5, threshold=0.3){
         if(s >= threshold){ list.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s }); }
       }
       list.sort((a,b)=> b.score - a.score);
-      item.suggestions = list.slice(0, limit);
+      const cap = Math.min(SUGGESTIONS_MAX, Number.isFinite(limit) ? limit : SUGGESTIONS_MAX);
+      item.suggestions = list.slice(0, cap);
     } else {
       item.suggestions = [];
     }
@@ -920,19 +959,8 @@ els.suggestKeys?.addEventListener('click', async () => {
 // Initial reflect
 reflectMode();
 
-// Debounced node text updates
-const textUpdateTimers = new Map(); // nodeId -> timeout id
-function scheduleNodeTextUpdate(nodeId, text, flush=false){
-  const key = String(nodeId);
-  if (textUpdateTimers.has(key)){
-    clearTimeout(textUpdateTimers.get(key));
-    textUpdateTimers.delete(key);
-  }
-  const send = () => { pm({ type: 'update-text', nodeId: key, text: String(text ?? '') }); };
-  if (flush){ send(); return; }
-  const t = setTimeout(send, 300);
-  textUpdateTimers.set(key, t);
-}
+// Удалено: ранее использовались дебаунс-обновления текста при вводе
+// Теперь текст синхронизируется только на blur, поэтому вспомогательные таймеры не нужны
 
 </script>
 </body>
