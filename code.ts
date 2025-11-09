@@ -29,6 +29,7 @@ interface TranslationMap { [key: string]: string; }
 const PLUGIN_KEY_KEY = 'locize:key';
 const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
 const SELECTION_STORAGE_KEY = 'locize:selected';
+const DEFAULT_NS = 'UnknownFeatureNs';
 
 // Helpers to persist selection state
 async function getSelectionMap(): Promise<Record<string, boolean>> {
@@ -88,7 +89,7 @@ function slugify(str: string): string {
     .normalize('NFD')
     .replace(/[^a-z0-9\s-_]/g, '')
     .trim()
-    .replace(/\s+/g, '_')
+    .replace(/\s+/g, '.')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
 }
@@ -243,7 +244,7 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'scan-selection': {
-      const namespace: string = msg.namespace || 'Common';
+      const namespace: string = msg.namespace || DEFAULT_NS;
       const selection = figma.currentPage.selection;
       if (!selection.length) {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No selection' });
