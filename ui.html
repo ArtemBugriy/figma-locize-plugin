@@ -10,15 +10,16 @@
     --bg-subtle: #f6f6f6;
     --bg-raised: #ffffff;
     --text: #111;
+    --text-secondary: #444;
     --text-dim: #666;
     --border: #d9d9d9;
     --border-strong: #b3b3b3;
     --hover: #ececec;
     --active: #e2e2e2;
     --focus: #18a0fb;
-    --primary: #18a0fb;
+    --primary: #0c8ce9;
     --primary-hover: #0d8fe6;
-    --primary-active: #0075c2;
+    --primary-active: #0a6dc2;
     --success-bg: #ecfdf5;
     --warn-bg: #fff8db;
     --error-bg: #fff1f0;
@@ -29,34 +30,50 @@
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #2c2c2c; --bg-subtle: #3a3a3a; --bg-raised: #303030;
-      --text: #f3f3f3; --text-dim: #bdbdbd;
-      --border: #3d3d3d; --border-strong: #555;
-      --hover: #3f3f3f; --active: #4a4a4a;
-      --primary: #18a0fb; --primary-hover: #2aafff; --primary-active: #0d8fe6;
-      --success-bg: #123c2c; --warn-bg: #4a430f; --error-bg: #4a1d1d;
-      --scroll: #555; --scroll-hover: #777;
+      --bg: #2c2c2c;
+      --bg-subtle: #3a3a3a;
+      --bg-raised: #303030;
+      --text: #f3f3f3;
+      --text-secondary: #9e9e9e;
+      --text-dim: #bdbdbd;
+      --border: #3d3d3d;
+      --border-strong: #555;
+      --hover: #3f3f3f;
+      --active: #4a4a4a;
+      --primary: #18a0fb;
+      --primary-hover: #2aafff;
+      --primary-active: #0d8fe6;
+      --success-bg: #123c2c;
+      --warn-bg: #4a430f;
+      --error-bg: #4a1d1d;
+      --scroll: #555;
+      --scroll-hover: #777;
     }
   }
 
   /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  ::-webkit-scrollbar { width: 3px; height: 3px; background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
-  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
 
-  body { font: var(--font); margin: 8px 10px 14px; background: var(--bg); color: var(--text); }
+  html {
+    display: flex;
+    justify-content: center;
+  }
+
+  body { width: 760px; height: max-content; margin: 0; box-sizing: border-box; font: var(--font); padding: 14px 10px 56px; background: var(--bg); color: var(--text); }
   h2 { margin: 8px 0 4px; font-size: 14px; }
 
-  fieldset { border: 1px solid var(--border); padding: 10px 12px 12px; margin-bottom: 10px; border-radius: var(--radius-m); background: var(--bg-raised); }
+  fieldset { display: block; max-width: 100%; width: 100%; box-sizing: border-box; min-inline-size: 0; border: 1px solid var(--border); padding: 10px 12px 12px; margin: 0 0 10px; border-radius: var(--radius-m); background: var(--bg-raised); }
   legend { padding: 0 6px; font-weight: 600; color: var(--text-dim); font-size: 11px; }
 
-  label { display: flex; flex-direction: column; font-size: 11px; gap: 4px; color: var(--text-dim); }
+  label { cursor: pointer; display: flex; flex-direction: column; font-size: 11px; gap: 4px; color: var(--text-dim); }
 
   input[type=text], input[type=password], select, textarea, [contenteditable="true"].editable-cell {
     font: var(--font);
     background: var(--bg-subtle);
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius-s);
     padding: 4px 6px;
     color: var(--text);
@@ -65,22 +82,42 @@
   }
   input[type=text]:hover, input[type=password]:hover, select:hover, textarea:hover, [contenteditable="true"].editable-cell:hover { background: var(--hover); }
   input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus, [contenteditable="true"].editable-cell:focus { border-color: var(--focus); box-shadow: var(--shadow-focus); background: var(--bg); }
-
-  .key-input { width: 220px; }
+  input[type=checkbox], input[type=radio] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+  .checkbox {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  tbody input[type=text], tbody select, tbody textarea, tbody [contenteditable="true"].editable-cell,
+  tbody input[type=text]:hover, tbody select:hover, tbody textarea:hover, tbody [contenteditable="true"].editable-cell:hover,
+  tbody input[type=text]:focus, tbody select:focus, tbody textarea:focus, tbody [contenteditable="true"].editable-cell:focus {
+    background: transparent;
+    box-shadow: none;
+    width: auto;
+    max-width: 300px;
+    font-size: 11px;
+    line-height: normal;
+  }
 
   button { cursor: pointer; padding: 4px 10px; font: var(--font); border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--bg-subtle); color: var(--text); transition: background var(--transition), border-color var(--transition), box-shadow var(--transition); }
-  button:hover { background: var(--hover); }
-  button:active { background: var(--active); }
-  button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+  button:not(:disabled):hover { background: var(--hover); }
+  button:not(:disabled):active, button:not(:disabled).active { background: var(--active); }
+  button:not(:disabled):focus-visible { outline: none; box-shadow: var(--shadow-focus); }
   button[disabled] { opacity: .6; cursor: default; }
 
   /* Primary emphasis buttons */
-  #saveSettings, #applyKeys, #uploadKeys { background: var(--primary); border-color: var(--primary); color: #fff; }
-  #saveSettings:hover, #applyKeys:hover, #uploadKeys:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
-  #saveSettings:active, #applyKeys:active, #uploadKeys:active { background: var(--primary-active); }
+  button.button-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  button.button-primary:not(:disabled):hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  button.button-primary:not(:disabled):active, button.button-primary:not(:disabled).active { background: var(--primary-active); }
 
-  table { border-collapse: collapse; width: 100%; font-size: 11px; table-layout: fixed; }
-  th, td { border: 1px solid var(--border); padding: 4px 6px; vertical-align: top; }
+  table { border-collapse: collapse; font-size: 11px; table-layout: auto; }
+  th, td { padding: 10px 6px; vertical-align: middle; }
   th { background: var(--bg-subtle); position: sticky; top: 0; z-index: 1; color: var(--text-dim); font-weight: 600; }
   tbody tr { transition: background 90ms ease; }
   tbody tr:hover td { background: var(--hover); }
@@ -91,67 +128,73 @@
 
   tbody input { border: none; outline: none; background: transparent; }
 
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .row-flex { display: flex; gap: 8px; }
   .small { font-size: 10px; color: var(--text-dim); }
-  .status { margin-top: 6px; min-height: 16px; font-size: 11px; white-space: pre-line; background: var(--bg-subtle); border: 1px solid var(--border); padding: 6px 8px; border-radius: var(--radius-s); }
+  .status { margin-top: 12px; min-height: 16px; font-size: 11px; white-space: pre-line; padding: 6px 8px; }
   .lang-badge { background: var(--bg-subtle); padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; border:1px solid var(--border); }
   .flex { display: flex; }
   .gap { gap: 8px; }
   .grow { flex: 1; }
+  .flex-wrap { flex-wrap: wrap; }
+  .items-center { align-items: center; }
+  .items-end { align-items: flex-end; }
+  .items-start { align-items: flex-start; }
+  .justify-center { justify-content: center; }
   .nowrap { white-space: nowrap; }
+  .mt-6px { margin-top: 6px; }
+  .my-6px { margin-block: 6px; }
+  .mt-12px { margin-top: 12px; }
+  .my-12px { margin-block: 12px; }
+  .text-secondary { color: var(--text-secondary); }
+  .text-dim { color: var(--text-dim); }
 
-  #keys-container { max-height: 600px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-m); }
+  .table-container { display: block; max-width: 100%; box-sizing: content-box; max-height: 800px; overflow: auto; padding: 0 12px; margin: 12px -12px; }
 
-  #uploadProgress { width: 100%; height: 4px; background: var(--bg-subtle); margin-top:4px; position: relative; border-radius: 2px; border: 1px solid var(--border); overflow: hidden; }
+  #uploadProgress { width: 100%; height: 4px; margin-top:4px; position: relative; border-radius: 2px; overflow: hidden; }
   #uploadProgress span { position:absolute; top:0; left:0; height:100%; background: var(--primary); width:0; transition: width .2s; }
-
-  #scanSelection.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-  #scanSelection.active:hover { background: var(--primary-hover); }
 </style>
 </head>
 <body>
   <fieldset>
     <legend>Settings</legend>
-    <div class="row-flex" style="align-items:flex-end; flex-wrap:wrap;">
+    <div class="flex gap flex-wrap items-end">
       <label class="grow">Project ID<input id="projectId" type="text" placeholder="project id" /></label>
       <label class="grow">API Key (write)<input id="apiKey" type="password" placeholder="write api key" /></label>
       <label>Version<input id="version" type="text" value="latest" /></label>
       <label>Base Lang<input id="baseLanguage" type="text" value="en" /></label>
-      <button id="saveSettings">Save</button>
+      <button id="saveSettings" class="button-primary">Save</button>
     </div>
-    <div class="small" style="margin-top: 12px;">Data is saved locally in the plugin clientStorage.</div>
+    <div class="small mt-12px">Data is saved locally in the plugin clientStorage.</div>
   </fieldset>
 
   <fieldset>
     <legend>Language</legend>
-    <div class="row-flex gap" style="align-items:center; flex-wrap:wrap;">
+    <div class="flex gap flex-wrap items-center">
       <label>Language<select id="languageSelect"></select></label>
     </div>
-    <div class="small">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
-    <div class="small" id="nsListInfo" style="margin-top:4px;color:#444;"></div>
+    <div class="small mt-6px">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
+    <div class="small mt-6px text-secondary" id="nsListInfo"></div>
   </fieldset>
 
   <fieldset>
     <legend>Key management</legend>
-    <div class="row-flex gap" style="align-items:flex-end; flex-wrap:wrap;">
+    <div class="flex gap flex-wrap items-end">
       <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
-      <div class="row-flex" style="align-items:center; gap:6px;">
-        <button id="scanSelection">Scan selection</button>
-      </div>
-      <label style="flex-direction:row; align-items:center; gap:6px; margin:0;">
+      <button id="scanSelection" class="button-primary">Scan selection</button>
+      <label class="checkbox">
         <input id="hideUnchecked" type="checkbox" />
         <span>Hide unchecked</span>
       </label>
+    </div>
+    <div class="flex gap flex-wrap items-end mt-6px">
       <label class="grow">Suggest from namespaces (comma separated)
         <input id="suggestNamespaces" type="text" placeholder="Common, Landing, Auth" />
       </label>
-      <button id="suggestKeys">Suggest keys</button>
+      <button id="suggestKeys" class="button-primary">Suggest keys</button>
       <!-- New: Apply all top suggestions button -->
       <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
     </div>
-    <div class="small" style="margin: 6px 0;">Keys are generated based on hierarchy and layer/text name.</div>
-    <div id="keys-container">
+    <div class="small my-6px">Keys are generated based on hierarchy and layer/text name.</div>
+    <div class="table-container">
       <table id="keysTable">
         <thead>
           <tr>
@@ -161,20 +204,22 @@
             <th style="min-width: 150px;"><small>✏️</small>&nbsp;Text</th>
             <th style="min-width: 150px;">Remote Text</th>
             <th>Suggestions</th>
-            <th>Original Node Name</th>
+            <th style="min-width: 90px;">Orig Node Name</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
-    <div class="actions" style="margin-top:6px;">
-      <button id="applyKeys" disabled>Apply keys to nodes</button>
-      <button id="uploadKeys" disabled>Upload to locize</button>
-      <label style="flex-direction:row; align-items:center; gap:6px; margin:0;" title="Available only for base language">
+    <div class="flex gap flex-wrap mt-6px">
+      <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
+      <button id="uploadKeys" class="button-primary" disabled>Upload to locize</button>
+      <label class="checkbox" title="Available only for base language">
         <input id="autotranslate" type="checkbox" />
         <span>Autotranslate</span>
       </label>
+    </div>
+    <div class="flex gap flex-wrap mt-6px">
       <button id="restoreNames" disabled>Restore original node names</button>
     </div>
     <div id="uploadProgress"><span></span></div>
@@ -263,7 +308,6 @@ function renderTable(){
     const nsInput = document.createElement('input');
     nsInput.type = 'text';
     nsInput.value = item.namespace || '';
-    nsInput.style.width = '90px';
     // Сохраняем начальное значение на фокус
     nsInput.addEventListener('focus', () => { nsInput.dataset.prev = item.namespace || ''; });
     // Обновляем модель на ввод, но не триггерим перерасчёты/перерисовку
