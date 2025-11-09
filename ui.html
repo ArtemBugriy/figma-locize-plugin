@@ -4,43 +4,110 @@
 <meta charset="UTF-8" />
 <title>Locize Integration</title>
 <style>
-  /* Narrow scrollbar */
-  ::-webkit-scrollbar { width: 3px; height: 3px; background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 1.5px; }
-  ::-webkit-scrollbar-thumb:hover { background: #999; }
-  ::-webkit-scrollbar-track { background: transparent; border-radius: 1.5px; }
-  /* Base styles */
-  body { font: 12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 12px; }
+  :root {
+    --font: 12px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --bg: #ffffff;
+    --bg-subtle: #f6f6f6;
+    --bg-raised: #ffffff;
+    --text: #111;
+    --text-dim: #666;
+    --border: #d9d9d9;
+    --border-strong: #b3b3b3;
+    --hover: #ececec;
+    --active: #e2e2e2;
+    --focus: #18a0fb;
+    --primary: #18a0fb;
+    --primary-hover: #0d8fe6;
+    --primary-active: #0075c2;
+    --success-bg: #ecfdf5;
+    --warn-bg: #fff8db;
+    --error-bg: #fff1f0;
+    --scroll: #bbb; --scroll-hover: #999;
+    --radius-s: 4px; --radius-m: 6px;
+    --shadow-focus: 0 0 0 1px var(--focus);
+    --transition: 120ms ease;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #2c2c2c; --bg-subtle: #3a3a3a; --bg-raised: #303030;
+      --text: #f3f3f3; --text-dim: #bdbdbd;
+      --border: #3d3d3d; --border-strong: #555;
+      --hover: #3f3f3f; --active: #4a4a4a;
+      --primary: #18a0fb; --primary-hover: #2aafff; --primary-active: #0d8fe6;
+      --success-bg: #123c2c; --warn-bg: #4a430f; --error-bg: #4a1d1d;
+      --scroll: #555; --scroll-hover: #777;
+    }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  body { font: var(--font); margin: 8px 10px 14px; background: var(--bg); color: var(--text); }
   h2 { margin: 8px 0 4px; font-size: 14px; }
-  fieldset { border: 1px solid #ccc; padding: 8px 10px 10px; margin-bottom: 10px; }
-  legend { padding: 0 4px; font-weight: 600; }
-  label { display: flex; flex-direction: column; font-size: 11px; gap: 2px; }
-  input[type=text], input[type=password], select { padding: 4px 6px; font-size: 12px; }
-  input.key-input { width: 220px; }
-  table { border-collapse: collapse; width: 100%; font-size: 11px; }
-  th, td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
-  th { background: #f5f5f5; position: sticky; top: 0; }
-  /* keep old statuses for sync coloring */
-  tbody tr.synced td { background: #f0fff4; }
-  tbody tr.unsynced td { background: #fff8db; }
-  tbody tr.missing td { background: #fff7f7; }
+
+  fieldset { border: 1px solid var(--border); padding: 10px 12px 12px; margin-bottom: 10px; border-radius: var(--radius-m); background: var(--bg-raised); }
+  legend { padding: 0 6px; font-weight: 600; color: var(--text-dim); font-size: 11px; }
+
+  label { display: flex; flex-direction: column; font-size: 11px; gap: 4px; color: var(--text-dim); }
+
+  input[type=text], input[type=password], select, textarea, [contenteditable="true"].editable-cell {
+    font: var(--font);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-s);
+    padding: 4px 6px;
+    color: var(--text);
+    outline: none;
+    transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  }
+  input[type=text]:hover, input[type=password]:hover, select:hover, textarea:hover, [contenteditable="true"].editable-cell:hover { background: var(--hover); }
+  input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus, [contenteditable="true"].editable-cell:focus { border-color: var(--focus); box-shadow: var(--shadow-focus); background: var(--bg); }
+
+  .key-input { width: 220px; }
+
+  button { cursor: pointer; padding: 4px 10px; font: var(--font); border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--bg-subtle); color: var(--text); transition: background var(--transition), border-color var(--transition), box-shadow var(--transition); }
+  button:hover { background: var(--hover); }
+  button:active { background: var(--active); }
+  button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+  button[disabled] { opacity: .6; cursor: default; }
+
+  /* Primary emphasis buttons */
+  #saveSettings, #applyKeys, #uploadKeys { background: var(--primary); border-color: var(--primary); color: #fff; }
+  #saveSettings:hover, #applyKeys:hover, #uploadKeys:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  #saveSettings:active, #applyKeys:active, #uploadKeys:active { background: var(--primary-active); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 11px; table-layout: fixed; }
+  th, td { border: 1px solid var(--border); padding: 4px 6px; vertical-align: top; }
+  th { background: var(--bg-subtle); position: sticky; top: 0; z-index: 1; color: var(--text-dim); font-weight: 600; }
+  tbody tr { transition: background 90ms ease; }
+  tbody tr:hover td { background: var(--hover); }
+
+  tbody tr.synced td { background: var(--success-bg); }
+  tbody tr.unsynced td { background: var(--warn-bg); }
+  tbody tr.missing td { background: var(--error-bg); }
+
   tbody input { border: none; outline: none; background: transparent; }
+
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  button { cursor: pointer; padding: 4px 12px; font-size: 12px; }
   .row-flex { display: flex; gap: 8px; }
-  .small { font-size: 10px; color: #666; }
-  .status { margin-top: 6px; min-height: 16px; font-size: 11px; white-space: pre-line; }
-  .lang-badge { background:#eee; padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; }
+  .small { font-size: 10px; color: var(--text-dim); }
+  .status { margin-top: 6px; min-height: 16px; font-size: 11px; white-space: pre-line; background: var(--bg-subtle); border: 1px solid var(--border); padding: 6px 8px; border-radius: var(--radius-s); }
+  .lang-badge { background: var(--bg-subtle); padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; border:1px solid var(--border); }
   .flex { display: flex; }
   .gap { gap: 8px; }
   .grow { flex: 1; }
   .nowrap { white-space: nowrap; }
-  #keys-container { max-height: 600px; overflow: auto; }
-  #uploadProgress { width: 100%; height: 4px; background: #eee; margin-top:4px; position: relative; }
-  #uploadProgress span { position:absolute; top:0; left:0; height:100%; background:#4a8cff; width:0; transition: width .2s; }
-  /* Active mode styling for Scan selection button */
-  #scanSelection.active { background: #4a8cff; color: #fff; border-color: #4a8cff; }
-  #scanSelection.active:hover { background: #3a74d1; }
+
+  #keys-container { max-height: 600px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-m); }
+
+  #uploadProgress { width: 100%; height: 4px; background: var(--bg-subtle); margin-top:4px; position: relative; border-radius: 2px; border: 1px solid var(--border); overflow: hidden; }
+  #uploadProgress span { position:absolute; top:0; left:0; height:100%; background: var(--primary); width:0; transition: width .2s; }
+
+  #scanSelection.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  #scanSelection.active:hover { background: var(--primary-hover); }
 </style>
 </head>
 <body>
@@ -245,6 +312,7 @@ function renderTable(){
     // Editable text with apply-on-blur sync to node (contenteditable)
     const textDiv = document.createElement('div');
     textDiv.contentEditable = 'true';
+    textDiv.className = 'editable-cell';
     textDiv.textContent = item.text ?? '';
     textDiv.style.width = '100%';
     textDiv.style.boxSizing = 'border-box';
