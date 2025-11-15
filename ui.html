@@ -184,6 +184,8 @@
               <tbody></tbody>
             </table>
           </div>
+          <!-- New: simplified extra items info under the table -->
+          <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px">
             <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
             <button id="restoreNames" disabled>Restore original node names</button>
@@ -241,6 +243,7 @@ const els = {
   applyTopSuggestions: document.getElementById('applyTopSuggestions'),
   tabPanels: document.getElementById('tabPanels'),
   tabButtons: Array.from(document.querySelectorAll('.tab-btn')), // new
+  extraItemsInfo: document.getElementById('extraItemsInfo'), // new
 };
 
 let currentItems = [];
@@ -258,6 +261,8 @@ const remoteCache = {};
 const suggestionPool = {};
 // Max suggestions per item
 const SUGGESTIONS_MAX = 5;
+// Max rows in table
+const MAX_TABLE_ROWS = 100;
 const DEFAULT_NS = 'UnknownFeatureNs';
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
@@ -279,7 +284,9 @@ function updateAutotranslateAvailability(){
 function renderTable(){
   els.tableBody.innerHTML = '';
   const itemsToRender = hideUnchecked ? currentItems.filter(i => i.selected !== false) : currentItems;
-  itemsToRender.forEach((item) => {
+  const limitedItems = itemsToRender.slice(0, MAX_TABLE_ROWS);
+  const extraCount = Math.max(0, itemsToRender.length - limitedItems.length);
+  limitedItems.forEach((item) => {
     if(!item.namespace || !item.localKey){
       const dot = (item.key||'').indexOf('.')
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
@@ -434,6 +441,16 @@ function renderTable(){
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdSugg); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
   });
+  // simplified: toggle paragraph under the table instead of adding a tbody row
+  if (els.extraItemsInfo) {
+    if (extraCount > 0) {
+      els.extraItemsInfo.style.display = '';
+      els.extraItemsInfo.textContent = `+${extraCount} items`;
+    } else {
+      els.extraItemsInfo.style.display = 'none';
+      els.extraItemsInfo.textContent = '';
+    }
+  }
   updateButtons();
 }
 
