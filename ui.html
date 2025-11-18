@@ -843,7 +843,7 @@ async function fetchNamespacesFromApi(s, lang){
 
 async function ensureNamespaceSuggestionsLoaded(){
   const s = collectSettings();
-  const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  const lang = s.baseLanguage || 'en';
   if(!s.projectId || !s.version || !lang) return [];
   const key = getNsCacheKey(s, lang);
   if(nsSuggestCache[key]) return nsSuggestCache[key];
