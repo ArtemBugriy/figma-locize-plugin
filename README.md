@@ -22,18 +22,6 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 - Simple flat-map handling of nested JSON translation structures
 - Caching of fetched namespaces per language to minimize API calls
 
-## Store Listing Snippet (Copy/Paste)
-Bring localization into your design workflow:
-- Generate stable i18n keys from text layers automatically
-- Re-use existing translation keys with smart fuzzy suggestions
-- Color-coded sync status (missing / unsynced / synced) for quick QA
-- Upload and optionally autotranslate base language strings to locize
-- Preview any language instantly by applying remote translations to the canvas
-- Restore original layer names whenever you need
-
-Boost collaboration between designers and localization teams—eliminate manual key spreadsheets and keep text consistent end-to-end.
-
-
 ---
 
 
@@ -77,3 +65,7 @@ We recommend writing TypeScript code using Visual Studio code:
     you reopen Visual Studio Code.
 
 That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
+
+---
+
+Vibecoded with a help of an ai-assistant

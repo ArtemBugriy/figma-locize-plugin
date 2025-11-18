@@ -1,7 +1,7 @@
 {
   "name": "Figma Locize Plugin",
   "version": "1.0.0",
-  "description": "Your Figma Plugin",
+  "description": "Effortlessly bridge your Figma designs with your locize translation project. Scan text layers, assign stable i18n keys, upload source content, fetch translations, and preview localized UI directly in the canvas.",
   "main": "code.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
