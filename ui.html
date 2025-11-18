@@ -129,6 +129,36 @@
   .tab-panels { position: relative; }
   .tab-panel { display: none; padding-block: 12px; }
   .tab-panel.active { display: block; }
+
+  /* Autocomplete dropdown for namespaces */
+  .ns-suggest-dropdown {
+    position: absolute;
+    z-index: 1000;
+    min-width: 200px;
+    max-width: 420px;
+    max-height: 220px;
+    overflow: auto;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-s);
+    box-shadow: 0 4px 10px rgba(0,0,0,.08);
+  }
+  .ns-suggest-item {
+    padding: 6px 8px;
+    cursor: pointer;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ns-suggest-item:hover,
+  .ns-suggest-item.active {
+    background: var(--hover);
+  }
+  .ns-suggest-empty {
+    padding: 6px 8px;
+    color: var(--text-dim);
+  }
 </style>
 </head>
 <body>
@@ -596,6 +626,8 @@ els.saveSettings.addEventListener('click', async () => {
     pm({ type: 'get-namespaces' });
     scheduleStatusRefresh();
     updateAutotranslateAvailability();
+    // preload namespaces list for suggestions
+    preloadNamespaceSuggestions();
   } else {
     pm({ type:'notify', message:'Invalid Locize credentials' });
   }
@@ -779,6 +811,216 @@ async function updateSuggestionsForCurrent(){
   renderTable();
 }
 
+// =====================
+// Namespaces autocomplete for suggestNamespaces
+// =====================
+const nsSuggestCache = {}; // key: `${projectId}|${version}|${language}` -> string[] namespaces
+let nsDropdownEl = null;
+let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '' };
+
+function getNsCacheKey(s, lang){
+  return `${s.projectId}|${s.version}|${lang}`;
+}
+
+async function fetchNamespacesFromApi(s, lang){
+  const url = `https://api.locize.app/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const data = await res.json();
+  // Expect array of objects with key like project/version/lang/namespace
+  const set = new Set();
+  for(const it of (Array.isArray(data) ? data : [])){
+    const k = String(it && (it.key || it.url) || '');
+    if(!k) continue;
+    const parts = k.split('/');
+    const ns = parts[parts.length-1] || '';
+    if(ns) set.add(ns);
+  }
+  const list = Array.from(set);
+  list.sort((a,b)=> a.localeCompare(b));
+  return list;
+}
+
+async function ensureNamespaceSuggestionsLoaded(){
+  const s = collectSettings();
+  const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  if(!s.projectId || !s.version || !lang) return [];
+  const key = getNsCacheKey(s, lang);
+  if(nsSuggestCache[key]) return nsSuggestCache[key];
+  try {
+    const list = await fetchNamespacesFromApi(s, lang);
+    nsSuggestCache[key] = list;
+    return list;
+  } catch(e){ setStatus('Failed to load namespaces for suggestions: '+ (e && e.message ? e.message : e)); return []; }
+}
+
+function currentNamespaceTokens(){
+  const raw = els.suggestNamespaces.value;
+  const tokens = raw.split(',').map(t => t.trim()).filter(Boolean);
+  return tokens;
+}
+
+function setNamespaceTokens(tokens){
+  const uniq = Array.from(new Set(tokens.filter(Boolean)));
+  els.suggestNamespaces.value = uniq.join(', ');
+}
+
+function getLastTokenInfo(){
+  const val = els.suggestNamespaces.value;
+  const lastComma = val.lastIndexOf(',');
+  const before = lastComma >= 0 ? val.slice(0, lastComma+1) : '';
+  const cur = lastComma >= 0 ? val.slice(lastComma+1) : val;
+  return { before, cur: cur.trimStart() };
+}
+
+function filterNsItems(list, query){
+  const q = (query || '').toLowerCase();
+  if(!q) return list.slice(0, 50);
+  const starts = [];
+  const contains = [];
+  for(const n of list){
+    const ln = n.toLowerCase();
+    if(ln.startsWith(q)) starts.push(n);
+    else if(ln.includes(q)) contains.push(n);
+  }
+  return starts.concat(contains).slice(0, 50);
+}
+
+function ensureDropdownEl(){
+  if(nsDropdownEl) return nsDropdownEl;
+  const el = document.createElement('div');
+  el.className = 'ns-suggest-dropdown';
+  el.style.display = 'none';
+  document.body.appendChild(el);
+  nsDropdownEl = el;
+  return el;
+}
+
+function positionDropdown(anchor){
+  if(!nsDropdownEl || !anchor) return;
+  const r = anchor.getBoundingClientRect();
+  nsDropdownEl.style.minWidth = r.width + 'px';
+  nsDropdownEl.style.left = Math.round(window.scrollX + r.left) + 'px';
+  nsDropdownEl.style.top = Math.round(window.scrollY + r.bottom + 2) + 'px';
+}
+
+function renderNsDropdown(items){
+  const el = ensureDropdownEl();
+  el.innerHTML = '';
+  if(!items.length){
+    const empty = document.createElement('div');
+    empty.className = 'ns-suggest-empty';
+    empty.textContent = 'No namespaces';
+    el.appendChild(empty);
+  } else {
+    items.forEach((ns, idx) => {
+      const it = document.createElement('div');
+      it.className = 'ns-suggest-item' + (idx === nsDropdownState.activeIndex ? ' active' : '');
+      it.textContent = ns;
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); commitNamespaceChoice(ns); });
+      el.appendChild(it);
+    });
+  }
+}
+
+function openNsDropdown(anchor, items){
+  nsDropdownState.open = true;
+  nsDropdownState.items = items;
+  nsDropdownState.activeIndex = items.length ? 0 : -1;
+  nsDropdownState.anchor = anchor;
+  positionDropdown(anchor);
+  renderNsDropdown(items);
+  nsDropdownEl.style.display = 'block';
+}
+
+function updateNsDropdown(anchor, items){
+  if(!nsDropdownState.open){ openNsDropdown(anchor, items); return; }
+  nsDropdownState.items = items;
+  nsDropdownState.activeIndex = items.length ? Math.min(nsDropdownState.activeIndex, items.length-1) : -1;
+  positionDropdown(anchor);
+  renderNsDropdown(items);
+}
+
+function closeNsDropdown(){
+  nsDropdownState.open = false;
+  nsDropdownState.items = [];
+  nsDropdownState.activeIndex = -1;
+  nsDropdownState.anchor = null;
+  if(nsDropdownEl){ nsDropdownEl.style.display = 'none'; }
+}
+
+function moveActive(delta){
+  if(!nsDropdownState.open || !nsDropdownState.items.length) return;
+  const len = nsDropdownState.items.length;
+  nsDropdownState.activeIndex = ( (nsDropdownState.activeIndex + delta) % len + len ) % len;
+  renderNsDropdown(nsDropdownState.items);
+}
+
+function commitNamespaceChoice(ns){
+  const tokens = currentNamespaceTokens();
+  const info = getLastTokenInfo();
+  const before = info.before;
+  // replace the last token (after last comma) with chosen ns
+  let headTokens = tokens;
+  if(before){
+    headTokens = before.slice(0, -1).split(',').map(t=>t.trim()).filter(Boolean);
+  } else {
+    // if no comma existed previously, remove any partial from tokens
+    headTokens = tokens.slice(0, -1);
+  }
+  headTokens.push(ns);
+  setNamespaceTokens(headTokens);
+  // add trailing comma+space for convenient next entry
+  if(els.suggestNamespaces.value && !els.suggestNamespaces.value.endsWith(', ')){
+    els.suggestNamespaces.value += ', ';
+  }
+  // trigger update of suggestions pool
+  scheduleSuggestionsRefresh();
+  closeNsDropdown();
+  els.suggestNamespaces.focus();
+}
+
+function onSuggestInputChange(){
+  // Whenever user types, schedule suggestions refresh
+  scheduleSuggestionsRefresh();
+  (async () => {
+    const list = await ensureNamespaceSuggestionsLoaded();
+    if(!list || !list.length) { closeNsDropdown(); return; }
+    const { cur } = getLastTokenInfo();
+    const filtered = filterNsItems(list, cur);
+    if(document.activeElement === els.suggestNamespaces){
+      if(!nsDropdownState.open) openNsDropdown(els.suggestNamespaces, filtered);
+      else updateNsDropdown(els.suggestNamespaces, filtered);
+    }
+  })();
+}
+
+function onSuggestInputFocus(){
+  (async () => {
+    const list = await ensureNamespaceSuggestionsLoaded();
+    const { cur } = getLastTokenInfo();
+    const filtered = filterNsItems(list, cur);
+    if(filtered.length){ openNsDropdown(els.suggestNamespaces, filtered); }
+  })();
+}
+
+function onSuggestInputKeydown(e){
+  if(!nsDropdownState.open) return;
+  if(e.key === 'ArrowDown'){ e.preventDefault(); moveActive(1); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); moveActive(-1); }
+  else if(e.key === 'Enter' || e.key === 'Tab'){
+    if(nsDropdownState.activeIndex >= 0){ e.preventDefault(); const ns = nsDropdownState.items[nsDropdownState.activeIndex]; commitNamespaceChoice(ns); }
+  } else if(e.key === 'Escape'){ closeNsDropdown(); }
+}
+
+// attach events
+els.suggestNamespaces?.addEventListener('input', onSuggestInputChange);
+els.suggestNamespaces?.addEventListener('focus', onSuggestInputFocus);
+els.suggestNamespaces?.addEventListener('keydown', onSuggestInputKeydown);
+els.suggestNamespaces?.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
+window.addEventListener('resize', ()=> positionDropdown(nsDropdownState.anchor));
+window.addEventListener('scroll', ()=> positionDropdown(nsDropdownState.anchor), true);
+
 els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
   const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
@@ -813,6 +1055,8 @@ els.languageSelect.addEventListener('change', async () => {
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
   // update suggestions if namespaces provided
   updateSuggestionsForCurrent();
+  // preload namespaces autocomplete list for new language
+  preloadNamespaceSuggestions();
 });
 
 els.restoreNames.addEventListener('click', () => {
@@ -1005,6 +1249,8 @@ window.onmessage = (event) => {
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
       updateAutotranslateAvailability();
+      // preload namespaces list for suggestions
+      preloadNamespaceSuggestions();
       break;
     }
     case 'scan-result': {
@@ -1076,6 +1322,11 @@ els.suggestKeys?.addEventListener('click', async () => {
   setStatus('Suggestions updated');
 });
 
+// Preload namespaces list for current language (for autocomplete)
+async function preloadNamespaceSuggestions(){
+  await ensureNamespaceSuggestionsLoaded();
+}
+
 // Initial reflect
 reflectMode();
 
@@ -1103,6 +1354,10 @@ reflectMode();
       }
     });
   });
+})();
+
+(function () {
+
 })();
 </script>
 </body>
