@@ -211,7 +211,7 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
   }
 }
 
-figma.showUI(__html__, { width: 800, height: 800 });
+figma.showUI(__html__, { width: 740, height: 740 });
 
 // Auto notify UI on selection change
 figma.on('selectionchange', () => {
