@@ -306,11 +306,11 @@ function renderTable(){
     const nsInput = document.createElement('input');
     nsInput.type = 'text';
     nsInput.value = item.namespace || '';
-    // Сохраняем начальное значение на фокус
+    // Store initial value on focus
     nsInput.addEventListener('focus', () => { nsInput.dataset.prev = item.namespace || ''; });
-    // Обновляем модель на ввод, но не триггерим перерасчёты/перерисовку
+    // Update model on input without triggering recompute/rerender
     nsInput.addEventListener('input', () => { item.namespace = nsInput.value; /* no recompute/render here */ });
-    // Применяем изменения только на blur/Enter
+    // Apply changes only on blur/Enter
     const commitNs = () => {
       const val = (nsInput.value || '').trim();
       nsInput.value = val;
@@ -331,9 +331,9 @@ function renderTable(){
     keyInput.type = 'text';
     keyInput.value = item.localKey || '';
     keyInput.className = 'key-input';
-    // Сохраняем начальное значение на фокус
+    // Store initial value on focus
     keyInput.addEventListener('focus', () => { keyInput.dataset.prev = item.localKey || ''; });
-    // Только локально обновляем модель
+    // Update the model locally only
     keyInput.addEventListener('input', () => { item.localKey = keyInput.value; /* no recompute/render here */ });
     const commitKey = () => {
       const val = (keyInput.value || '').trim();
@@ -363,12 +363,12 @@ function renderTable(){
     textDiv.style.wordBreak = 'break-word';
     textDiv.style.outline = 'none';
     textDiv.addEventListener('input', () => {
-      // Обновляем только локальное значение, без перерисовки/статуса во время набора
+      // Update local value only; no rerender/status update while typing
       item.text = textDiv.innerText;
-      // Не отправляем в Figma и не обновляем статус/подсказки на каждый символ
+      // Don't send to Figma or update status/suggestions on every character
     });
     textDiv.addEventListener('blur', () => {
-      // Применяем в Figma и обновляем статус/подсказки только при потере фокуса
+      // Apply to Figma and update status/suggestions only on blur
       const val = textDiv.innerText;
       item.text = val;
       pm({ type: 'update-text', nodeId: item.nodeId, text: val });
@@ -406,7 +406,7 @@ function renderTable(){
       item.suggestions.forEach((sug, idx) => {
         const opt = document.createElement('option');
         opt.value = `${sug.namespace}.${sug.key}`;
-        // Показываем превью значения, чтобы удобнее выбирать
+        // Show value preview to make selection easier
         const preview = (sug.value || '').replace(/\s+/g,' ').slice(0,60);
         opt.textContent = `${sug.namespace}.${sug.key}${preview ? ' — '+preview : ''}`;
         if(idx===0) opt.selected = true;
@@ -667,7 +667,7 @@ function normalizeVal(v){
     .trim();
 }
 
-// Доп. нормализация для ключей (ns.key) и разбиение на токены
+// Extra normalization for keys (ns.key) and tokenization
 function normalizeKey(k){
   const s = String(k ?? '')
     .replace(/([a-z])([A-Z])/g, '$1 $2') // split camelCase
@@ -708,7 +708,7 @@ async function ensureSuggestNamespacesLoaded(s, language, namespaces){
   buildSuggestionPool(language, namespaces);
 }
 
-// Базовый скоринг между нормализованной строкой запроса и нормализованным кандидатом
+// Base scoring between normalized query string and normalized candidate
 function baseFuzzyScore(queryNorm, candNorm, candTokens){
   if(!queryNorm || !candNorm) return 0;
   if(queryNorm === candNorm) return 1.0;
@@ -734,11 +734,11 @@ function baseFuzzyScore(queryNorm, candNorm, candTokens){
   return score;
 }
 
-// Вычисление комбинированного скоринга: по тексту и по ключу
+// Compute combined score: by text and by key
 function combinedScore(valueQueryNorm, keyQueryNorm, cand){
   const sVal = baseFuzzyScore(valueQueryNorm, cand.norm, cand.tokens);
   const sKey = baseFuzzyScore(keyQueryNorm, cand.normKey, cand.keyTokens);
-  // Небольшой бонус, если namespace совпадает с выбранным у айтема
+  // Small bonus if namespace matches the item's selected one
   return Math.max(sVal, sKey * 0.95);
 }
 
@@ -1079,9 +1079,6 @@ els.suggestKeys?.addEventListener('click', async () => {
 // Initial reflect
 reflectMode();
 
-// Удалено: ранее использовались дебаунс-обновления текста при вводе
-// Теперь текст синхронизируется только на blur, поэтому вспомогательные таймеры не нужны
-
 // Tabs logic
 (function initTabs(){
   const panels = Array.from(document.querySelectorAll('.tab-panel'));
@@ -1107,7 +1104,6 @@ reflectMode();
     });
   });
 })();
-
 </script>
 </body>
 </html>
