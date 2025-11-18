@@ -1,3 +1,42 @@
+# Figma Locize Plugin
+
+Effortlessly bridge your Figma designs with your locize translation project. Scan text layers, assign stable i18n keys, upload source content, fetch translations, and preview localized UI directly in the canvas.
+
+## Features
+- Automatic i18n key generation based on layer hierarchy and node name (slugified, uniqueness ensured)
+- Namespace management: create new namespaces and auto-detect existing ones from assigned keys
+- Bulk scan of current selection (or entire page when nothing selected) for TEXT nodes
+- Inline editing of layer text with live sync back to the Figma node (fonts auto-loaded)
+- Persistent per-node selection state (unchecked items remembered across sessions) + “Hide unchecked” filter
+- Fuzzy key suggestion engine: suggests existing keys from chosen namespaces (configurable list) using normalized text similarity
+- One-click “Apply all top suggestions” to rapidly re-use existing keys
+- Sync status coloring (synced / unsynced / missing) comparing local text vs remote translations per language
+- Remote translation application: switch language and apply translations to all keyed nodes
+- Upload selected base language strings to locize with progress indicator (batched, cached)
+- Optional autotranslate toggle for the base language workflow (only enabled when viewing base language)
+- Original node name preservation and restore function after replacing names with keys
+- Select-all / bulk selection management with table row cap (100) and overflow indicator
+- Safe network scope (only calls https://api.locize.app)
+- Local clientStorage persistence for credentials, base language, version, and selection states
+- Font preloading before mutating characters prevents missing font errors
+- Simple flat-map handling of nested JSON translation structures
+- Caching of fetched namespaces per language to minimize API calls
+
+## Store Listing Snippet (Copy/Paste)
+Bring localization into your design workflow:
+- Generate stable i18n keys from text layers automatically
+- Re-use existing translation keys with smart fuzzy suggestions
+- Color-coded sync status (missing / unsynced / synced) for quick QA
+- Upload and optionally autotranslate base language strings to locize
+- Preview any language instantly by applying remote translations to the canvas
+- Restore original layer names whenever you need
+
+Boost collaboration between designers and localization teams—eliminate manual key spreadsheets and keep text consistent end-to-end.
+
+
+---
+
+
 Below are the steps to get your plugin running. You can also find instructions at:
 
   https://www.figma.com/plugin-docs/plugin-quickstart-guide/
@@ -38,23 +77,3 @@ We recommend writing TypeScript code using Visual Studio code:
     you reopen Visual Studio Code.
 
 That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
-
----
-
-Fuzzy suggestions for keys
-
-- Where: UI table, column "Suggestions".
-- How it works: The plugin fetches translations from Locize for the namespaces you list in the input "Suggest from namespaces". It builds a fuzzy index from both values and full keys (ns.key).
-- Matching: Suggestions are ranked by a combined score of similarity to node text and the edited key. Minor typos/case/diacritics are tolerated.
-- Live updates: As you type in the Key field, suggestions refresh automatically (debounced).
-- Usage:
-  1) Fill Settings and save; select a Language.
-  2) In "Key management", set "Suggest from namespaces" (comma-separated), e.g. `Common, Auth`.
-  3) Click "Suggest keys" or just edit the Key — suggestions will appear per row.
-  4) Pick a suggestion and press "Apply" to set namespace.key for that row.
-
-Notes
-
-- Network access must allow https://api.locize.app (already configured in manifest.json).
-- Only items with text will receive suggestions; empty text yields no suggestions.
-- If no namespaces are provided, suggestions are disabled.
