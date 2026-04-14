@@ -109,16 +109,6 @@ function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
   return result;
 }
 
-function buildHierarchyPath(node: SceneNode): string[] {
-  const path: string[] = [];
-  let current: BaseNode | null = node;
-  while (current && current.type !== 'PAGE') {
-    if ('name' in current) path.unshift(current.name);
-    current = current.parent as BaseNode | null;
-  }
-  return path;
-}
-
 function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
   const used = new Set<string>();
   const items: ScanItem[] = [];
@@ -130,10 +120,7 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
       key = existingKey;
       used.add(key.split('.').slice(-1)[0]);
     } else {
-      const pathParts = buildHierarchyPath(node).slice(-3);
-      const baseName = node.name && !/^text/i.test(node.name) ? node.name : node.characters.slice(0, 30);
-      const raw = [...pathParts, baseName].join('_');
-      let candidate = slugify(raw);
+      let candidate = node.name.trim();
       if (!candidate) candidate = 'text';
       let finalKey = candidate;
       let i = 1;
