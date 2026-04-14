@@ -127,16 +127,37 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
   return items;
 }
 
-async function ensureFonts(nodes: TextNode[]) {
-  const loaded = new Set<string>();
-  const promises: Promise<void>[] = [];
+function fontKey(font: FontName): string {
+  return `${font.family}__${font.style}`;
+}
+
+function collectNodeFonts(node: TextNode): FontName[] {
+  if (node.fontName !== figma.mixed) return [node.fontName as FontName];
+  return node.getStyledTextSegments(['fontName']).map(s => s.fontName);
+}
+
+/** Load all fonts for the given nodes. Returns a set of font keys that failed to load. */
+async function ensureFonts(nodes: TextNode[]): Promise<Set<string>> {
+  const toLoad = new Map<string, FontName>();
   for (const n of nodes) {
-    if (n.fontName === figma.mixed) continue;
-    const font = n.fontName as FontName;
-    const k = `${font.family}__${font.style}`;
-    if (!loaded.has(k)) { loaded.add(k); promises.push(figma.loadFontAsync(font)); }
+    for (const font of collectNodeFonts(n)) {
+      const k = fontKey(font);
+      if (!toLoad.has(k)) toLoad.set(k, font);
+    }
   }
-  await Promise.all(promises);
+  const failed = new Set<string>();
+  await Promise.all(
+    Array.from(toLoad.entries()).map(async ([k, font]) => {
+      try { await figma.loadFontAsync(font); }
+      catch (_) { failed.add(k); }
+    })
+  );
+  return failed;
+}
+
+/** Returns true if all fonts for this node loaded successfully. */
+function nodeFontsReady(node: TextNode, failed: Set<string>): boolean {
+  return collectNodeFonts(node).every(f => !failed.has(fontKey(f)));
 }
 
 function collectAssignedNamespaces(): string[] {
@@ -153,8 +174,10 @@ function collectAssignedNamespaces(): string[] {
 
 async function applyTranslations(map: TranslationMap, namespace: string) {
   const targetNodes = collectTextNodes(getSourceNodes()).filter(n => n.getPluginData(PLUGIN_KEY_KEY));
-  await ensureFonts(targetNodes);
+  const failedFonts = await ensureFonts(targetNodes);
+  let skipped = 0;
   for (const n of targetNodes) {
+    if (!nodeFontsReady(n, failedFonts)) { skipped++; continue; }
     const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
     if (!fullKey) continue;
     if (map[fullKey] !== undefined) { n.characters = map[fullKey]; continue; }
@@ -163,6 +186,7 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
       if (map[shortKey] !== undefined) n.characters = map[shortKey];
     }
   }
+  if (skipped > 0) figma.notify(`Skipped ${skipped} node(s): font not available`, { error: true });
 }
 
 /** Build a ScanItem list for all text nodes with an assigned key in the current scope. */
@@ -327,8 +351,12 @@ figma.ui.onmessage = async (msg) => {
         const node = await figma.getNodeByIdAsync(nodeId);
         if (node && node.type === 'TEXT') {
           const tn = node as TextNode;
-          await ensureFonts([tn]);
-          tn.characters = text;
+          const failedFonts = await ensureFonts([tn]);
+          if (nodeFontsReady(tn, failedFonts)) {
+            tn.characters = text;
+          } else {
+            figma.notify('One of the node fonts is not available — install it locally and reload the plugin', { error: true });
+          }
         }
       } catch (e) { console.error('update-text failed', e); }
       break;
