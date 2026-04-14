@@ -114,6 +114,7 @@
   .items-end { align-items: flex-end; }
   .items-start { align-items: flex-start; }
   .justify-center { justify-content: center; }
+  .justify-between { justify-content: space-between; }
   .nowrap { white-space: nowrap; }
   .mt-6px { margin-top: 6px; }
   .my-6px { margin-block: 6px; }
@@ -171,8 +172,9 @@
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
         <fieldset>
           <legend>Language</legend>
-          <div class="flex gap flex-wrap items-center">
+          <div class="flex gap flex-wrap justify-between items-end">
             <label>Language<select id="languageSelect"></select></label>
+            <button id="updateTranslations" disabled>Update Translations</button>
           </div>
           <div class="small mt-6px">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
           <div class="small mt-6px text-secondary" id="nsListInfo"></div>
@@ -261,6 +263,7 @@ const els = {
   tableBody: document.querySelector('#keysTable tbody'),
   selectAll: document.getElementById('selectAll'),
   languageSelect: document.getElementById('languageSelect'),
+  updateTranslations: document.getElementById('updateTranslations'),
   uploadProgress: document.querySelector('#uploadProgress span'),
   restoreNames: document.getElementById('restoreNames'),
   nsListInfo: document.getElementById('nsListInfo'),
@@ -1032,6 +1035,7 @@ els.languageSelect.addEventListener('change', async () => {
   const lang = els.languageSelect.value; if(!lang) { setStatus('Select a language'); return; }
   currentLanguage = lang;
   updateAutotranslateAvailability();
+  updateTranslationsButtonState();
   if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
   setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
@@ -1062,6 +1066,46 @@ els.languageSelect.addEventListener('change', async () => {
   updateSuggestionsForCurrent();
   // preload namespaces autocomplete list for new language
   ensureNamespaceSuggestionsLoaded();
+});
+
+els.updateTranslations.addEventListener('click', async () => {
+  const s = collectSettings();
+  if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
+  const lang = els.languageSelect.value;
+  if(!lang){ setStatus('Select a language'); return; }
+  if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
+
+  els.updateTranslations.disabled = true;
+  setStatus('Updating translations for: '+ detectedNamespaces.join(', '), false);
+  const sTime = Date.now();
+  // Evict only the affected languages from cache so fresh data is fetched
+  const baseLang = s.baseLanguage || 'en';
+  delete remoteCache[lang];
+  if(baseLang !== lang) delete remoteCache[baseLang];
+
+  for(const ns of detectedNamespaces){
+    try {
+      setStatus('→ '+ns+' ...', true);
+      const translations = await fetchTranslations(s, lang, ns);
+      const flatMap = flattenToMap(translations);
+      if(!remoteCache[lang]) remoteCache[lang] = {};
+      remoteCache[lang][ns] = flatMap;
+      pm({ type: 'apply-language', map: flatMap, namespace: ns });
+      if(baseLang !== lang){
+        const baseTranslations = await fetchTranslations(s, baseLang, ns);
+        const baseFlat = flattenToMap(baseTranslations);
+        if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
+        remoteCache[baseLang][ns] = baseFlat;
+      }
+      setStatus('✓ '+ns, true);
+    } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
+  }
+
+  pm({ type: 'get-assigned' });
+  await refreshSyncStatus();
+  setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
+  updateSuggestionsForCurrent();
+  els.updateTranslations.disabled = false;
 });
 
 els.restoreNames.addEventListener('click', () => {
@@ -1113,6 +1157,7 @@ async function fetchLanguagesList(){
     els.languageSelect.innerHTML = langs.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
     if(s.baseLanguage && !els.languageSelect.value) els.languageSelect.value = s.baseLanguage;
     updateAutotranslateAvailability();
+    updateTranslationsButtonState();
   } catch(e){ setStatus('Failed to load languages: '+ e.message); }
 }
 
@@ -1309,9 +1354,14 @@ window.addEventListener('message', (event) => {
   }
 });
 
+function updateTranslationsButtonState(){
+  els.updateTranslations.disabled = !els.languageSelect.value || !detectedNamespaces.length;
+}
+
 function updateNamespaces(list){
   detectedNamespaces = Array.isArray(list) ? list : [];
   els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'No namespaces found';
+  updateTranslationsButtonState();
 }
 
 // Reflect current mode to UI (active state for Scan selection)
