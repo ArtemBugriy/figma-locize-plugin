@@ -62,7 +62,6 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 
 ## Conventions & Patterns
 - **Default namespace fallback:** `DEFAULT_NS = 'UnknownFeatureNs'` — used when no namespace is provided.
-- **`slugify()`** normalizes layer names → dot-separated lowercase keys (spaces → `.`, strips non-alphanumeric).
 - **Key uniqueness:** `generateKeys()` uses a `Set<string>` per scan run; appends `_2`, `_3` on collision.
 - **Font preloading:** always call `ensureFonts(nodes)` before mutating `.characters` to avoid runtime errors.
 - **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page).

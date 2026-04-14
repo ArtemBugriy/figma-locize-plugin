@@ -1,14 +1,9 @@
-// This file holds the main code for plugins. Code in this file has access to
-// the *figma document* via the figma global object.
-// You can access browser APIs in the <script> tag inside "ui.html" which has a
-// full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
-
 // Locize integration plugin main code
 
 interface Settings {
   projectId: string;
-  apiKey: string; // write key
-  version: string; // e.g. 'latest' or environment version
+  apiKey: string;
+  version: string;
   baseLanguage: string;
 }
 
@@ -17,11 +12,11 @@ interface ScanItem {
   name: string;
   originalName: string;
   text: string;
-  key: string; // full key namespace.local
-  namespace: string; // namespace
-  localKey: string; // key part without namespace
+  key: string;
+  namespace: string;
+  localKey: string;
   existing: boolean;
-  selected?: boolean; // persisted UI selection state
+  selected?: boolean;
 }
 
 interface TranslationMap { [key: string]: string; }
@@ -31,81 +26,71 @@ const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
 const SELECTION_STORAGE_KEY = 'locize:selected';
 const DEFAULT_NS = 'UnknownFeatureNs';
 
-// Helpers to persist selection state
+// --- Storage helpers ---
+
 async function getSelectionMap(): Promise<Record<string, boolean>> {
   const v = await figma.clientStorage.getAsync(SELECTION_STORAGE_KEY);
   const map = (v as Record<string, boolean>) || {};
-  // Compact the map: keep only unchecked entries (false). Remove any truthy leftovers from previous versions.
+  // Compact: keep only unchecked entries (false). Remove truthy leftovers from older versions.
   let mutated = false;
   for (const k of Object.keys(map)) {
-    if (map[k] !== false) {
-      delete map[k];
-      mutated = true;
-    }
+    if (map[k] !== false) { delete map[k]; mutated = true; }
   }
-  if (mutated) {
-    await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
-  }
+  if (mutated) await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
   return map;
 }
 
 async function setSelection(nodeId: string, selected: boolean): Promise<void> {
   const map = await getSelectionMap();
   if (selected === false) {
-    // Persist only unchecked items to minimize storage
     map[nodeId] = false;
   } else {
-    // Remove entry when item is (re)selected to use default-checked behavior
-    if (nodeId in map) delete map[nodeId];
+    delete map[nodeId];
   }
   await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
 }
 
 async function setSelectionBulk(list: { nodeId: string; selected: boolean }[]): Promise<void> {
-  if (!Array.isArray(list) || !list.length) return;
+  if (!list.length) return;
   const map = await getSelectionMap();
   let mutated = false;
-  for (const it of list) {
-    if (it.selected === false) {
-      if (map[it.nodeId] !== false) {
-        map[it.nodeId] = false;
-        mutated = true;
-      }
-    } else {
-      if (it.nodeId in map) {
-        delete map[it.nodeId];
-        mutated = true;
-      }
+  for (const { nodeId, selected } of list) {
+    if (selected === false) {
+      if (map[nodeId] !== false) { map[nodeId] = false; mutated = true; }
+    } else if (nodeId in map) {
+      delete map[nodeId]; mutated = true;
     }
   }
-  if (mutated) {
-    await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
-  }
+  if (mutated) await figma.clientStorage.setAsync(SELECTION_STORAGE_KEY, map);
 }
 
-function slugify(str: string): string {
-  return str
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[^a-z0-9\s-_]/g, '')
-    .trim()
-    .replace(/\s+/g, '.')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
+// --- Key / node helpers ---
+
+/** Split a full i18n key into namespace and localKey on the first dot. */
+function parseKey(fullKey: string): { namespace: string; localKey: string } {
+  const dot = fullKey.indexOf('.');
+  return dot > -1
+    ? { namespace: fullKey.slice(0, dot), localKey: fullKey.slice(dot + 1) }
+    : { namespace: '', localKey: fullKey };
+}
+
+/** Returns the current selection, or the entire page when nothing is selected. */
+function getSourceNodes(): readonly SceneNode[] {
+  return figma.currentPage.selection.length
+    ? figma.currentPage.selection
+    : figma.currentPage.children;
 }
 
 function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
   const result: TextNode[] = [];
   function traverse(node: SceneNode) {
-    if ('type' in node) {
-      if (node.type === 'TEXT') {
-        result.push(node as TextNode);
-      } else if ('children' in node) {
-        for (const child of (node as ChildrenMixin).children) traverse(child as SceneNode);
-      }
+    if (node.type === 'TEXT') {
+      result.push(node as TextNode);
+    } else if ('children' in node) {
+      for (const child of (node as ChildrenMixin).children) traverse(child as SceneNode);
     }
   }
-  nodes.forEach(n => traverse(n));
+  nodes.forEach(traverse);
   return result;
 }
 
@@ -118,22 +103,16 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
     let key: string;
     if (existingKey) {
       key = existingKey;
-      used.add(key.split('.').slice(-1)[0]);
+      used.add(parseKey(existingKey).localKey);
     } else {
-      let candidate = node.name.trim();
-      if (!candidate) candidate = 'text';
+      const candidate = node.name.trim() || 'text';
       let finalKey = candidate;
       let i = 1;
-      while (used.has(finalKey)) {
-        i += 1;
-        finalKey = `${candidate}_${i}`;
-      }
+      while (used.has(finalKey)) { i += 1; finalKey = `${candidate}_${i}`; }
       key = `${namespace}.${finalKey}`;
       used.add(finalKey);
     }
-    const dotIndex = key.indexOf('.');
-    const ns = dotIndex > -1 ? key.slice(0, dotIndex) : '';
-    const local = dotIndex > -1 ? key.slice(dotIndex + 1) : key;
+    const { namespace: ns, localKey } = parseKey(key);
     items.push({
       nodeId: node.id,
       name: node.name,
@@ -141,7 +120,7 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
       text: node.characters,
       key,
       namespace: ns,
-      localKey: local,
+      localKey,
       existing: !!existingKey,
     });
   }
@@ -149,84 +128,107 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
 }
 
 async function ensureFonts(nodes: TextNode[]) {
-  const promises: Promise<void>[] = [];
   const loaded = new Set<string>();
+  const promises: Promise<void>[] = [];
   for (const n of nodes) {
-    const fontName = n.fontName;
-    if (fontName === figma.mixed) continue;
-    const key = `${(fontName as FontName).family}__${(fontName as FontName).style}`;
-    if (!loaded.has(key)) {
-      loaded.add(key);
-      promises.push(figma.loadFontAsync(fontName as FontName));
-    }
+    if (n.fontName === figma.mixed) continue;
+    const font = n.fontName as FontName;
+    const k = `${font.family}__${font.style}`;
+    if (!loaded.has(k)) { loaded.add(k); promises.push(figma.loadFontAsync(font)); }
   }
   await Promise.all(promises);
 }
 
 function collectAssignedNamespaces(): string[] {
   const set = new Set<string>();
-  const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
-  const textNodes = collectTextNodes(sourceNodes);
-  for (const n of textNodes) {
+  for (const n of collectTextNodes(getSourceNodes())) {
     const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
     if (fullKey) {
-      const dot = fullKey.indexOf('.');
-      if (dot > -1) set.add(fullKey.slice(0, dot));
+      const { namespace } = parseKey(fullKey);
+      if (namespace) set.add(namespace);
     }
   }
   return Array.from(set).sort();
 }
 
 async function applyTranslations(map: TranslationMap, namespace: string) {
-  const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
-  const allNodes: TextNode[] = collectTextNodes(sourceNodes);
-  const targetNodes = allNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY));
+  const targetNodes = collectTextNodes(getSourceNodes()).filter(n => n.getPluginData(PLUGIN_KEY_KEY));
   await ensureFonts(targetNodes);
   for (const n of targetNodes) {
     const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
     if (!fullKey) continue;
-    if (map[fullKey] !== undefined) {
-      n.characters = map[fullKey];
-      continue;
-    }
+    if (map[fullKey] !== undefined) { n.characters = map[fullKey]; continue; }
     if (namespace && fullKey.startsWith(namespace + '.')) {
-      const shortKey = fullKey.replace(namespace + '.', '');
-      if (map[shortKey] !== undefined) {
-        n.characters = map[shortKey];
-      }
+      const shortKey = fullKey.slice(namespace.length + 1);
+      if (map[shortKey] !== undefined) n.characters = map[shortKey];
     }
   }
 }
 
+/** Build a ScanItem list for all text nodes with an assigned key in the current scope. */
+async function buildAssignedItems(namespace?: string): Promise<ScanItem[]> {
+  const textNodes = collectTextNodes(getSourceNodes());
+  const selMap = await getSelectionMap();
+  return textNodes
+    .filter(n => n.getPluginData(PLUGIN_KEY_KEY))
+    .map(n => {
+      const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
+      const { namespace: ns, localKey } = parseKey(fullKey);
+      return {
+        nodeId: n.id,
+        name: n.name,
+        originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
+        text: n.characters,
+        key: fullKey,
+        namespace: ns,
+        localKey,
+        existing: true,
+        selected: selMap[n.id] !== false,
+      };
+    })
+    .filter(i => !namespace || i.key.startsWith(namespace + '.'));
+}
+
+// --- Plugin init ---
+
 figma.showUI(__html__, { width: 740, height: 740 });
 
-// Auto notify UI on selection change
 figma.on('selectionchange', () => {
-  try {
-    figma.ui.postMessage({ type: 'selection-change', selectionLength: figma.currentPage.selection.length, namespaces: collectAssignedNamespaces() });
-  } catch (e) {
-    // ignore
-  }
+  figma.ui.postMessage({
+    type: 'selection-change',
+    selectionLength: figma.currentPage.selection.length,
+    namespaces: collectAssignedNamespaces(),
+  });
 });
+
+// --- Message handler ---
 
 figma.ui.onmessage = async (msg) => {
   switch (msg.type) {
     case 'load-settings': {
+      const [projectId, apiKey, version, baseLanguage] = await Promise.all([
+        figma.clientStorage.getAsync('locize.projectId'),
+        figma.clientStorage.getAsync('locize.apiKey'),
+        figma.clientStorage.getAsync('locize.version'),
+        figma.clientStorage.getAsync('locize.baseLanguage'),
+      ]);
       const settings: Settings = {
-        projectId: (await figma.clientStorage.getAsync('locize.projectId')) || '',
-        apiKey: (await figma.clientStorage.getAsync('locize.apiKey')) || '',
-        version: (await figma.clientStorage.getAsync('locize.version')) || 'latest',
-        baseLanguage: (await figma.clientStorage.getAsync('locize.baseLanguage')) || 'en',
+        projectId: String(projectId || ''),
+        apiKey: String(apiKey || ''),
+        version: String(version || 'latest'),
+        baseLanguage: String(baseLanguage || 'en'),
       };
       figma.ui.postMessage({ type: 'settings-loaded', settings });
       break;
     }
     case 'save-settings': {
       const s: Settings = msg.settings;
-      await figma.clientStorage.setAsync('locize.projectId', s.projectId);
-      await figma.clientStorage.setAsync('locize.apiKey', s.apiKey);
-      await figma.clientStorage.setAsync('locize.version', s.version);
-      await figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage);
+      await Promise.all([
+        figma.clientStorage.setAsync('locize.projectId', s.projectId),
+        figma.clientStorage.setAsync('locize.apiKey', s.apiKey),
+        figma.clientStorage.setAsync('locize.version', s.version),
+        figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage),
+      ]);
       figma.notify('Settings saved');
       break;
     }
@@ -243,109 +245,56 @@ figma.ui.onmessage = async (msg) => {
         break;
       }
       const items = generateKeys(textNodes, namespace);
-      // merge persisted selection state
       try {
         const selMap = await getSelectionMap();
-        for (const it of items) {
-          it.selected = selMap[it.nodeId] !== false; // default true
-        }
-      } catch (e) { void e; }
+        for (const it of items) it.selected = selMap[it.nodeId] !== false;
+      } catch (_) { /* clientStorage unavailable, default to all selected */ }
       figma.ui.postMessage({ type: 'scan-result', items });
       break;
     }
     case 'apply-keys': {
       const items: ScanItem[] = msg.items;
-      for (const item of items) {
+      await Promise.all(items.map(async (item) => {
         const node = await figma.getNodeByIdAsync(item.nodeId);
         if (node && node.type === 'TEXT') {
           const textNode = node as TextNode;
-            // save key
           textNode.setPluginData(PLUGIN_KEY_KEY, item.key);
           if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
             textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
           }
-          try {
-            textNode.name = item.key;
-          } catch (error) {
-            console.log(error);
-          }
+          try { textNode.name = item.key; } catch (e) { console.error(e); }
         }
-      }
+      }));
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       figma.notify('Keys applied and names updated');
       break;
     }
     case 'apply-language': {
-      const map: TranslationMap = msg.map;
-      const namespace: string = msg.namespace;
-      await applyTranslations(map, namespace);
+      await applyTranslations(msg.map as TranslationMap, msg.namespace as string);
       figma.notify('Language applied');
       break;
     }
     case 'get-assigned': {
-      const namespace: string = msg.namespace || '';
-      const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
-      const textNodes = collectTextNodes(sourceNodes);
-      const selMap = await getSelectionMap();
-      const items: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
-        const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
-        const dotIndex = fullKey.indexOf('.');
-        const ns = dotIndex > -1 ? fullKey.slice(0, dotIndex) : '';
-        const local = dotIndex > -1 ? fullKey.slice(dotIndex + 1) : fullKey;
-        return {
-          nodeId: n.id,
-          name: n.name,
-          originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
-          text: n.characters,
-          key: fullKey,
-          namespace: ns,
-          localKey: local,
-          existing: true,
-          selected: selMap[n.id] !== false,
-        };
-      }).filter(i => !namespace || i.key.startsWith(namespace + '.'));
+      const items = await buildAssignedItems(msg.namespace || '');
       figma.ui.postMessage({ type: 'assigned-result', items });
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       break;
     }
     case 'restore-names': {
-      const items: { nodeId: string }[] = msg.items || [];
-      for (const it of items) {
-        const node = await figma.getNodeByIdAsync(it.nodeId);
+      const nodeIds: { nodeId: string }[] = msg.items || [];
+      await Promise.all(nodeIds.map(async ({ nodeId }) => {
+        const node = await figma.getNodeByIdAsync(nodeId);
         if (node && node.type === 'TEXT') {
           const textNode = node as TextNode;
           const orig = textNode.getPluginData(PLUGIN_ORIG_NAME_KEY);
           if (orig) {
-            try {
-              textNode.name = orig;
-            } catch (error) {
-              console.log(error);
-            }
+            try { textNode.name = orig; } catch (e) { console.error(e); }
           }
         }
-      }
+      }));
       figma.notify('Names restored');
-      const sourceNodes: readonly SceneNode[] = figma.currentPage.selection.length ? figma.currentPage.selection : figma.currentPage.children;
-      const textNodes = collectTextNodes(sourceNodes);
-      const selMap = await getSelectionMap();
-      const itemsOut: ScanItem[] = textNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY)).map(n => {
-        const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
-        const dotIndex = fullKey.indexOf('.');
-        const ns = dotIndex > -1 ? fullKey.slice(0, dotIndex) : '';
-        const local = dotIndex > -1 ? fullKey.slice(dotIndex + 1) : fullKey;
-        return {
-          nodeId: n.id,
-          name: n.name,
-          originalName: n.getPluginData(PLUGIN_ORIG_NAME_KEY) || n.name,
-          text: n.characters,
-          key: fullKey,
-          namespace: ns,
-          localKey: local,
-          existing: true,
-          selected: selMap[n.id] !== false,
-        };
-      });
-      figma.ui.postMessage({ type: 'assigned-result', items: itemsOut });
+      const items = await buildAssignedItems();
+      figma.ui.postMessage({ type: 'assigned-result', items });
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
       break;
     }
@@ -354,9 +303,7 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'set-selected': {
-      const nodeId: string = msg.nodeId;
-      const selected: boolean = !!msg.selected;
-      await setSelection(nodeId, selected);
+      await setSelection(msg.nodeId as string, !!msg.selected);
       break;
     }
     case 'set-selected-bulk': {
@@ -374,8 +321,8 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'update-text': {
-      const nodeId: string = msg.nodeId;
-      const text: string = String(msg.text ?? '');
+      const nodeId = msg.nodeId as string;
+      const text = String(msg.text ?? '');
       try {
         const node = await figma.getNodeByIdAsync(nodeId);
         if (node && node.type === 'TEXT') {
@@ -383,9 +330,7 @@ figma.ui.onmessage = async (msg) => {
           await ensureFonts([tn]);
           tn.characters = text;
         }
-      } catch (e) {
-        console.log('update-text failed', e);
-      }
+      } catch (e) { console.error('update-text failed', e); }
       break;
     }
   }

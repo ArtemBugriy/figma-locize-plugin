@@ -3,7 +3,6 @@
 Effortlessly bridge your Figma designs with your locize translation project. Scan text layers, assign stable i18n keys, upload source content, fetch translations, and preview localized UI directly in the canvas.
 
 ## Features
-- Automatic i18n key generation based on layer hierarchy and node name (slugified, uniqueness ensured)
 - Namespace management: create new namespaces and auto-detect existing ones from assigned keys
 - Bulk scan of current selection (or entire page when nothing selected) for TEXT nodes
 - Inline editing of layer text with live sync back to the Figma node (fonts auto-loaded)

@@ -193,7 +193,6 @@
               <input id="suggestNamespaces" type="text" placeholder="Common, Landing, Auth" />
             </label>
             <button id="suggestKeys" class="button-primary">Suggest keys</button>
-            <!-- New: Apply all top suggestions button -->
             <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
           </div>
           <div class="small my-6px">Keys are generated based on hierarchy and layer/text name.</div>
@@ -214,7 +213,6 @@
               <tbody></tbody>
             </table>
           </div>
-          <!-- New: simplified extra items info under the table -->
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px">
             <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
@@ -280,6 +278,7 @@ let currentItems = [];
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
+let lastMode = null;
 
 // Track verification sequence and allow cancellation
 let verifyController = null; // AbortController | null
@@ -287,6 +286,10 @@ let verifySeq = 0;
 
 // Cache of translations by language and namespace: { [language]: { [ns]: flatMap } }
 const remoteCache = {};
+
+function clearRemoteCache() {
+  for (const k in remoteCache) delete remoteCache[k];
+}
 // Suggestion candidates pool by language
 const suggestionPool = {};
 // Max suggestions per item
@@ -322,7 +325,7 @@ function renderTable(){
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
     const tr = document.createElement('tr');
-    const statusClass = item.status || (item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : ''));
+    const statusClass = itemStatusText(item) === '—' ? '' : itemStatusText(item);
     tr.className = statusClass;
 
     const tdSel = document.createElement('td');
@@ -465,8 +468,7 @@ function renderTable(){
     tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
-    const statusText = item.status ? item.status : (item.synced === true ? 'synced' : (item.synced === false ? 'unsynced' : '—'));
-    tdStatus.textContent = statusText;
+    tdStatus.textContent = itemStatusText(item);
 
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdSugg); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
@@ -482,6 +484,13 @@ function renderTable(){
     }
   }
   updateButtons();
+}
+
+function itemStatusText(item) {
+  if (item.status) return item.status;
+  if (item.synced === true) return 'synced';
+  if (item.synced === false) return 'unsynced';
+  return '—';
 }
 
 function recomputeKey(item){
@@ -500,11 +509,10 @@ function updateButtons(){
   els.applyKeys.disabled = !anySelected;
   els.uploadKeys.disabled = !anySelected;
   els.restoreNames.disabled = !currentItems.length;
-  // New: enable bulk apply if we have any items
-  if (els.applyTopSuggestions) els.applyTopSuggestions.disabled = !currentItems.length;
+  els.applyTopSuggestions.disabled = !currentItems.length;
 }
 
-// New: flatten nested dict to flat map of key -> value
+// Flatten nested dict to flat map of key -> value
 function flattenToMap(obj){
   const out = {};
   const stack = [[obj, '']];
@@ -627,7 +635,7 @@ els.saveSettings.addEventListener('click', async () => {
     scheduleStatusRefresh();
     updateAutotranslateAvailability();
     // preload namespaces list for suggestions
-    preloadNamespaceSuggestions();
+    ensureNamespaceSuggestionsLoaded();
   } else {
     pm({ type:'notify', message:'Invalid Locize credentials' });
   }
@@ -672,8 +680,7 @@ els.uploadKeys.addEventListener('click', async () => {
   const s = collectSettings();
   if(!validateSettings(s)) return;
   await uploadSelectedKeys(sel, s);
-  // Invalidate all caches (both languages)
-  for(const k in remoteCache) delete remoteCache[k];
+  clearRemoteCache();
   await refreshSyncStatus();
 });
 
@@ -981,7 +988,6 @@ function commitNamespaceChoice(ns){
 }
 
 function onSuggestInputChange(){
-  // Whenever user types, schedule suggestions refresh
   scheduleSuggestionsRefresh();
   (async () => {
     const list = await ensureNamespaceSuggestionsLoaded();
@@ -992,7 +998,7 @@ function onSuggestInputChange(){
       if(!nsDropdownState.open) openNsDropdown(els.suggestNamespaces, filtered);
       else updateNsDropdown(els.suggestNamespaces, filtered);
     }
-  })();
+  })().catch(e => setStatus('Namespace load failed: ' + (e && e.message ? e.message : e)));
 }
 
 function onSuggestInputFocus(){
@@ -1001,7 +1007,7 @@ function onSuggestInputFocus(){
     const { cur } = getLastTokenInfo();
     const filtered = filterNsItems(list, cur);
     if(filtered.length){ openNsDropdown(els.suggestNamespaces, filtered); }
-  })();
+  })().catch(() => {});
 }
 
 function onSuggestInputKeydown(e){
@@ -1014,10 +1020,10 @@ function onSuggestInputKeydown(e){
 }
 
 // attach events
-els.suggestNamespaces?.addEventListener('input', onSuggestInputChange);
-els.suggestNamespaces?.addEventListener('focus', onSuggestInputFocus);
-els.suggestNamespaces?.addEventListener('keydown', onSuggestInputKeydown);
-els.suggestNamespaces?.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
+els.suggestNamespaces.addEventListener('input', onSuggestInputChange);
+els.suggestNamespaces.addEventListener('focus', onSuggestInputFocus);
+els.suggestNamespaces.addEventListener('keydown', onSuggestInputKeydown);
+els.suggestNamespaces.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
 window.addEventListener('resize', ()=> positionDropdown(nsDropdownState.anchor));
 window.addEventListener('scroll', ()=> positionDropdown(nsDropdownState.anchor), true);
 
@@ -1029,8 +1035,7 @@ els.languageSelect.addEventListener('change', async () => {
   if(!detectedNamespaces.length){ setStatus('No saved keys (namespaces list is empty)'); return; }
   setStatus('Loading translations for: '+ detectedNamespaces.join(', '), false);
   const sTime = Date.now();
-  // clear caches for new selection
-  for(const k in remoteCache) delete remoteCache[k];
+  clearRemoteCache();
   const baseLang = s.baseLanguage || 'en';
   for(const ns of detectedNamespaces){
     try {
@@ -1056,7 +1061,7 @@ els.languageSelect.addEventListener('change', async () => {
   // update suggestions if namespaces provided
   updateSuggestionsForCurrent();
   // preload namespaces autocomplete list for new language
-  preloadNamespaceSuggestions();
+  ensureNamespaceSuggestionsLoaded();
 });
 
 els.restoreNames.addEventListener('click', () => {
@@ -1066,8 +1071,7 @@ els.restoreNames.addEventListener('click', () => {
   setStatus('Restoring names...');
 });
 
-// New: apply all top suggestions (selected rows, or all if none selected)
-els.applyTopSuggestions?.addEventListener('click', async () => {
+els.applyTopSuggestions.addEventListener('click', async () => {
   await updateSuggestionsForCurrent();
   const selected = currentItems.filter(i => i.selected !== false);
   const targets = selected.length ? selected : currentItems;
@@ -1095,6 +1099,10 @@ function validateSettings(s){
   return true;
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 async function fetchLanguagesList(){
   const s = collectSettings(); if(!s.projectId) return;
   try {
@@ -1102,7 +1110,7 @@ async function fetchLanguagesList(){
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const langs = Object.keys(data);
-    els.languageSelect.innerHTML = langs.map(l => `<option value="${l}">${l}</option>`).join('');
+    els.languageSelect.innerHTML = langs.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
     if(s.baseLanguage && !els.languageSelect.value) els.languageSelect.value = s.baseLanguage;
     updateAutotranslateAvailability();
   } catch(e){ setStatus('Failed to load languages: '+ e.message); }
@@ -1152,8 +1160,7 @@ async function uploadSelectedKeys(items, s){
       }
     }
   }
-  // Invalidate and refresh cache for current language
-  for(const k in remoteCache) delete remoteCache[k];
+  clearRemoteCache();
   await refreshSyncStatus();
   setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys}`, true);
 }
@@ -1224,17 +1231,17 @@ async function verifyCredentials(s, signal, seq){
   if(isCurrent()) setStatus('Verifying credentials...');
   try {
     const res = await fetch(`https://api.locize.app/languages/${s.projectId}`, { signal });
-    const json = await res.json();
-    if (isObjectEmpty(json)) { if(isCurrent()) setStatus('Project is empty or not found', true); return false; }
     if(res.status === 404){ if(isCurrent()) setStatus('Project not found (404)', true); return false; }
     if(res.status === 401 || res.status === 403){ if(isCurrent()) setStatus('Unauthorized to access project: '+res.status, true); return false; }
     if(!res.ok){ if(isCurrent()) setStatus('Project check failed: HTTP '+res.status, true); return false; }
+    const json = await res.json();
+    if(isObjectEmpty(json)){ if(isCurrent()) setStatus('Project not found or empty', true); return false; }
     if(isCurrent()) setStatus('Credentials verified ✓', true);
     return true;
   } catch(e){ if(signal?.aborted) { return false; } if(isCurrent()) setStatus('Project check failed: '+ (e && e.message ? e.message : e), true); return false; }
 }
 
-window.onmessage = (event) => {
+window.addEventListener('message', (event) => {
   const msg = event.data.pluginMessage;
   if(!msg) return;
   switch(msg.type){
@@ -1250,7 +1257,7 @@ window.onmessage = (event) => {
       scheduleStatusRefresh();
       updateAutotranslateAvailability();
       // preload namespaces list for suggestions
-      preloadNamespaceSuggestions();
+      ensureNamespaceSuggestionsLoaded();
       break;
     }
     case 'scan-result': {
@@ -1300,9 +1307,7 @@ window.onmessage = (event) => {
       break;
     }
   }
-};
-
-let lastMode = null;
+});
 
 function updateNamespaces(list){
   detectedNamespaces = Array.isArray(list) ? list : [];
@@ -1317,30 +1322,25 @@ function reflectMode(){
 }
 
 // trigger suggestions by button
-els.suggestKeys?.addEventListener('click', async () => {
+els.suggestKeys.addEventListener('click', async () => {
   await updateSuggestionsForCurrent();
   setStatus('Suggestions updated');
 });
 
-// Preload namespaces list for current language (for autocomplete)
-async function preloadNamespaceSuggestions(){
-  await ensureNamespaceSuggestionsLoaded();
-}
 
 // Initial reflect
 reflectMode();
 
 // Tabs logic
 (function initTabs(){
-  const panels = Array.from(document.querySelectorAll('.tab-panel'));
   function activate(id){
     const btn = els.tabButtons.find(b => b.id === 'tab-'+id);
     const panel = document.getElementById('panel-'+id);
     if(!btn || !panel) return;
-    panels.forEach(p => { p.classList.remove('active'); p.style.display='none'; });
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     els.tabButtons.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
     btn.classList.add('active'); btn.setAttribute('aria-selected','true');
-    panel.classList.add('active'); panel.style.display='block';
+    panel.classList.add('active');
   }
   els.tabButtons.forEach(btn => {
     btn.addEventListener('click', () => activate(btn.id.replace('tab-','')));
@@ -1354,10 +1354,6 @@ reflectMode();
       }
     });
   });
-})();
-
-(function () {
-
 })();
 </script>
 </body>
