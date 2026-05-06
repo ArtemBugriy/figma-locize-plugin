@@ -217,12 +217,18 @@ async function buildAssignedItems(namespace?: string): Promise<ScanItem[]> {
 
 figma.showUI(__html__, { width: 740, height: 740 });
 
+let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
+
 figma.on('selectionchange', () => {
-  figma.ui.postMessage({
-    type: 'selection-change',
-    selectionLength: figma.currentPage.selection.length,
-    namespaces: collectAssignedNamespaces(),
-  });
+  if (selectionChangeTimer !== null) clearTimeout(selectionChangeTimer);
+  selectionChangeTimer = setTimeout(() => {
+    selectionChangeTimer = null;
+    figma.ui.postMessage({
+      type: 'selection-change',
+      selectionLength: figma.currentPage.selection.length,
+      namespaces: collectAssignedNamespaces(),
+    });
+  }, 150);
 });
 
 // --- Message handler ---
