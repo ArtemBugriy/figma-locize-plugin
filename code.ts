@@ -226,10 +226,11 @@ figma.on('selectionchange', () => {
   if (selectionChangeTimer !== null) clearTimeout(selectionChangeTimer);
   selectionChangeTimer = setTimeout(() => {
     selectionChangeTimer = null;
+    const selectionLength = figma.currentPage.selection.length;
     figma.ui.postMessage({
       type: 'selection-change',
-      selectionLength: figma.currentPage.selection.length,
-      namespaces: collectAssignedNamespaces(),
+      selectionLength,
+      namespaces: selectionLength > 0 ? collectAssignedNamespaces() : [],
     });
   }, 150);
 });
@@ -339,7 +340,8 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'get-namespaces': {
-      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      const namespaces = figma.currentPage.selection.length > 0 ? collectAssignedNamespaces() : [];
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces });
       break;
     }
     case 'set-selected': {
