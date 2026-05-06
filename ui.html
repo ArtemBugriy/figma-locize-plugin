@@ -104,7 +104,8 @@
   tbody input { border: none; outline: none; background: transparent; }
 
   .small { font-size: 10px; color: var(--text-dim); }
-  .status { margin-top: 12px; min-height: 16px; font-size: 11px; white-space: pre-line; padding: 6px 8px; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--border); z-index: 10; }
+  .status { width: 700px; margin: 0 auto; min-height: 28px; max-height: 100px; overflow: auto; font-size: 11px; white-space: pre-line; padding: 10px 22px 12px; color: var(--text-dim); box-sizing: border-box; }
   .lang-badge { background: var(--bg-subtle); padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; border:1px solid var(--border); }
   .flex { display: flex; }
   .gap { gap: 8px; }
@@ -246,7 +247,7 @@
     </div>
   </div>
 
-  <div class="status" id="status"></div>
+  <footer><div class="status" id="status"></div></footer>
 
 <script>
 const els = {
