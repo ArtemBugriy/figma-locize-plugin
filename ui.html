@@ -58,7 +58,7 @@
   ::-webkit-scrollbar-track { background: var(--bg); }
 
   html { display: flex; justify-content: center; }
-  body { width: 700px; height: max-content; margin: 0; box-sizing: border-box; font: var(--font); padding: 14px 10px 56px; background: var(--bg); color: var(--text); }
+  body { width: 700px; max-width: 100%; height: max-content; margin: 0; box-sizing: border-box; font: var(--font); padding: 14px 10px 56px; background: var(--bg); color: var(--text); }
   h2 { margin: 8px 0 4px; font-size: 14px; }
 
   fieldset { display: block; max-width: 100%; width: 100%; box-sizing: border-box; min-inline-size: 0; border: 1px solid var(--border); padding: 10px 12px 12px; margin: 0 0 10px; border-radius: var(--radius-m); background: var(--bg-raised); }
@@ -104,8 +104,10 @@
   tbody input { border: none; outline: none; background: transparent; }
 
   .small { font-size: 10px; color: var(--text-dim); }
-  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--border); z-index: 10; }
-  .status { width: 700px; margin: 0 auto; min-height: 28px; max-height: 100px; overflow: auto; font-size: 11px; white-space: pre-line; padding: 10px 22px 12px; color: var(--text-dim); box-sizing: border-box; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--border); z-index: 10; display: flex; align-items: stretch; }
+  .status { flex: 1; min-height: 28px; max-height: 100px; overflow: auto; font-size: 11px; white-space: pre-line; padding: 6px 10px; color: var(--text-dim); box-sizing: border-box; }
+  #resize-handle { width: 20px; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: flex-end; padding: 4px; cursor: nwse-resize; color: var(--border-strong); opacity: 0.4; transition: opacity var(--transition); user-select: none; }
+  #resize-handle:hover { opacity: 1; }
   .lang-badge { background: var(--bg-subtle); padding:2px 6px; border-radius:10px; font-size:10px; margin-right:4px; display:inline-block; border:1px solid var(--border); }
   .flex { display: flex; }
   .gap { gap: 8px; }
@@ -248,7 +250,14 @@
     </div>
   </div>
 
-  <footer><div class="status" id="status"></div></footer>
+  <footer>
+    <div class="status" id="status"></div>
+    <div id="resize-handle">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        <circle cx="9" cy="9" r="1.5"/><circle cx="5" cy="9" r="1.5"/><circle cx="9" cy="5" r="1.5"/>
+      </svg>
+    </div>
+  </footer>
 
 <script>
 const els = {
@@ -1438,6 +1447,25 @@ reflectMode();
         activate(els.tabButtons[ni].id.replace('tab-',''));
       }
     });
+  });
+})();
+
+// Resize handle
+(function initResize(){
+  const handle = document.getElementById('resize-handle');
+  const MIN_W = 400, MIN_H = 200;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const startW = window.innerWidth, startH = window.innerHeight;
+    const onMove = (e) => {
+      pm({ type: 'resize',
+        width:  Math.max(MIN_W, startW + e.clientX - startX),
+        height: Math.max(MIN_H, startH + e.clientY - startY),
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', () => window.removeEventListener('mousemove', onMove), { once: true });
   });
 })();
 </script>

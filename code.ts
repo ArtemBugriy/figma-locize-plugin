@@ -225,7 +225,19 @@ async function buildAssignedItems(namespace?: string): Promise<{ items: ScanItem
 
 // --- Plugin init ---
 
-figma.showUI(__html__, { width: 740, height: 740 });
+const DEFAULT_UI_WIDTH = 740;
+const DEFAULT_UI_HEIGHT = 740;
+
+(async () => {
+  const [w, h] = await Promise.all([
+    figma.clientStorage.getAsync('ui.width'),
+    figma.clientStorage.getAsync('ui.height'),
+  ]);
+  figma.showUI(__html__, {
+    width:  Number(w) || DEFAULT_UI_WIDTH,
+    height: Number(h) || DEFAULT_UI_HEIGHT,
+  });
+})();
 
 let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -358,6 +370,16 @@ figma.ui.onmessage = async (msg) => {
     case 'set-selected-bulk': {
       const list: { nodeId: string; selected: boolean }[] = Array.isArray(msg.list) ? msg.list : [];
       await setSelectionBulk(list);
+      break;
+    }
+    case 'resize': {
+      const w = Math.round(msg.width as number);
+      const h = Math.round(msg.height as number);
+      figma.ui.resize(w, h);
+      await Promise.all([
+        figma.clientStorage.setAsync('ui.width', w),
+        figma.clientStorage.setAsync('ui.height', h),
+      ]);
       break;
     }
     case 'notify': {
