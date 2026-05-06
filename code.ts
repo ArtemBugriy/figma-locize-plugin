@@ -83,14 +83,17 @@ function getSourceNodes(): readonly SceneNode[] {
 
 function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
   const result: TextNode[] = [];
-  function traverse(node: SceneNode) {
+  const stack: SceneNode[] = [...nodes];
+  while (stack.length) {
+    const node = stack.pop()!;
     if (node.type === 'TEXT') {
       result.push(node as TextNode);
     } else if ('children' in node) {
-      for (const child of (node as ChildrenMixin).children) traverse(child as SceneNode);
+      for (const child of (node as ChildrenMixin).children) {
+        stack.push(child as SceneNode);
+      }
     }
   }
-  nodes.forEach(traverse);
   return result;
 }
 
@@ -305,9 +308,15 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'get-assigned': {
-      const items = await buildAssignedItems(msg.namespace || '');
+      const namespace = msg.namespace || '';
+      const items = await buildAssignedItems(namespace);
       figma.ui.postMessage({ type: 'assigned-result', items });
-      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      // Derive namespaces from already-traversed items when no filter is active,
+      // avoiding a second full tree walk via collectAssignedNamespaces().
+      const namespaces = namespace
+        ? collectAssignedNamespaces()
+        : Array.from(new Set(items.map(i => i.namespace).filter(Boolean))).sort() as string[];
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces });
       break;
     }
     case 'restore-names': {
@@ -325,7 +334,8 @@ figma.ui.onmessage = async (msg) => {
       figma.notify('Names restored');
       const items = await buildAssignedItems();
       figma.ui.postMessage({ type: 'assigned-result', items });
-      figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
+      const namespaces = Array.from(new Set(items.map(i => i.namespace).filter(Boolean))).sort() as string[];
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces });
       break;
     }
     case 'get-namespaces': {

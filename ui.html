@@ -335,7 +335,8 @@ function renderTable(){
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
     const tr = document.createElement('tr');
-    const statusClass = itemStatusText(item) === '—' ? '' : itemStatusText(item);
+    const statusText = itemStatusText(item);
+    const statusClass = statusText === '—' ? '' : statusText;
     tr.className = statusClass;
 
     const tdSel = document.createElement('td');
@@ -478,7 +479,7 @@ function renderTable(){
     tdOrig.textContent = item.originalName || '';
 
     const tdStatus = document.createElement('td');
-    tdStatus.textContent = itemStatusText(item);
+    tdStatus.textContent = statusText;
 
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdSugg); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
     els.tableBody.appendChild(tr);
@@ -510,12 +511,16 @@ function recomputeKey(item){
 }
 
 function updateButtons(){
-  const all = currentItems.length > 0 && currentItems.every(i => i.selected !== false);
-  const none = currentItems.every(i => i.selected === false);
-  els.selectAll.indeterminate = !all && !none;
-  els.selectAll.checked = all && !none;
-
-  const anySelected = currentItems.some(i => i.selected !== false);
+  let allSelected = currentItems.length > 0;
+  let noneSelected = true;
+  for(const i of currentItems){
+    const sel = i.selected !== false;
+    if(!sel) allSelected = false;
+    if(sel) noneSelected = false;
+  }
+  const anySelected = !noneSelected;
+  els.selectAll.indeterminate = !allSelected && !noneSelected;
+  els.selectAll.checked = allSelected;
   els.applyKeys.disabled = !anySelected;
   els.uploadKeys.disabled = !anySelected;
   els.restoreNames.disabled = !currentItems.length;
@@ -558,13 +563,13 @@ async function refreshSyncStatus(){
   try {
     const baseLang = s.baseLanguage || 'en';
     // Ensure cache for required namespaces for current and base languages
+    if(!remoteCache[currentLanguage]) remoteCache[currentLanguage] = {};
+    if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
     for(const ns of nsSet){
-      if(!remoteCache[currentLanguage]) remoteCache[currentLanguage] = {};
       if(!remoteCache[currentLanguage][ns]){
         const data = await fetchTranslations(s, currentLanguage, ns);
         remoteCache[currentLanguage][ns] = flattenToMap(data);
       }
-      if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
       if(!remoteCache[baseLang][ns]){
         const baseData = await fetchTranslations(s, baseLang, ns);
         remoteCache[baseLang][ns] = flattenToMap(baseData);
@@ -766,12 +771,11 @@ async function ensureSuggestNamespacesLoaded(s, language, namespaces){
   buildSuggestionPool(language, namespaces);
 }
 
-// Base scoring between normalized query string and normalized candidate
-function baseFuzzyScore(queryNorm, candNorm, candTokens){
+// queryTokens and queryTokenSet are pre-computed outside the hot loop (once per item, not per candidate).
+function baseFuzzyScore(queryNorm, queryTokens, queryTokenSet, candNorm, candTokens){
   if(!queryNorm || !candNorm) return 0;
   if(queryNorm === candNorm) return 1.0;
   let score = 0;
-  // substring based
   if(candNorm.includes(queryNorm)){
     const ratio = Math.min(1, queryNorm.length / Math.max(1, candNorm.length));
     score = Math.max(score, 0.85 * ratio);
@@ -780,44 +784,49 @@ function baseFuzzyScore(queryNorm, candNorm, candTokens){
     const ratio = Math.min(1, candNorm.length / Math.max(1, queryNorm.length));
     score = Math.max(score, 0.75 * ratio);
   }
-  // token overlap
-  const qTokens = queryNorm.split(' ');
-  const setQ = new Set(qTokens);
-  let overlap = 0;
-  for(const t of candTokens){ if(setQ.has(t)) overlap++; }
-  if(qTokens.length){
-    const tokenRatio = overlap / Math.max(qTokens.length, candTokens.length);
+  if(queryTokens.length){
+    let overlap = 0;
+    for(const t of candTokens){ if(queryTokenSet.has(t)) overlap++; }
+    const tokenRatio = overlap / Math.max(queryTokens.length, candTokens.length);
     score = Math.max(score, 0.7 * tokenRatio);
   }
   return score;
 }
 
-// Compute combined score: by text and by key
-function combinedScore(valueQueryNorm, keyQueryNorm, cand){
-  const sVal = baseFuzzyScore(valueQueryNorm, cand.norm, cand.tokens);
-  const sKey = baseFuzzyScore(keyQueryNorm, cand.normKey, cand.keyTokens);
-  // Small bonus if namespace matches the item's selected one
+function combinedScore(valueQueryNorm, valueQTokens, valueQSet, keyQueryNorm, keyQTokens, keyQSet, cand){
+  const sVal = baseFuzzyScore(valueQueryNorm, valueQTokens, valueQSet, cand.norm, cand.tokens);
+  const sKey = baseFuzzyScore(keyQueryNorm, keyQTokens, keyQSet, cand.normKey, cand.keyTokens);
   return Math.max(sVal, sKey * 0.95);
 }
 
-// Compute suggestions for each item
+// Top-K selection: keeps only `cap` best candidates in a fixed-size array instead of
+// collecting all matches and sorting a potentially huge intermediate list.
 function suggestForItems(language, namespaces, limit=5, threshold=0.3){
   const pool = suggestionPool[language] || [];
+  const cap = Math.min(SUGGESTIONS_MAX, Number.isFinite(limit) ? limit : SUGGESTIONS_MAX);
   for(const item of currentItems){
     const valueQuery = normalizeVal(item.text);
     const keyQuery = normalizeKey(item.localKey || '');
-    const list = [];
-    if(valueQuery || keyQuery){
-      for(const cand of pool){
-        const s = combinedScore(valueQuery, keyQuery, cand);
-        if(s >= threshold){ list.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s }); }
+    if(!valueQuery && !keyQuery){ item.suggestions = []; continue; }
+    // Pre-compute tokens once per item, not once per candidate
+    const valueQTokens = valueQuery.split(' ');
+    const valueQSet = new Set(valueQTokens);
+    const keyQTokens = keyQuery.split(' ');
+    const keyQSet = new Set(keyQTokens);
+    const topK = [];
+    for(const cand of pool){
+      const s = combinedScore(valueQuery, valueQTokens, valueQSet, keyQuery, keyQTokens, keyQSet, cand);
+      if(s < threshold) continue;
+      if(topK.length < cap){
+        topK.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s });
+      } else {
+        let worstIdx = 0;
+        for(let j=1;j<cap;j++) if(topK[j].score < topK[worstIdx].score) worstIdx = j;
+        if(s > topK[worstIdx].score) topK[worstIdx] = { namespace: cand.namespace, key: cand.key, value: cand.value, score: s };
       }
-      list.sort((a,b)=> b.score - a.score);
-      const cap = Math.min(SUGGESTIONS_MAX, Number.isFinite(limit) ? limit : SUGGESTIONS_MAX);
-      item.suggestions = list.slice(0, cap);
-    } else {
-      item.suggestions = [];
     }
+    topK.sort((a,b)=> b.score - a.score);
+    item.suggestions = topK;
   }
 }
 
