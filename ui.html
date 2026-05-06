@@ -1332,6 +1332,8 @@ window.addEventListener('message', (event) => {
     }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
+      else if(msg.truncated) setStatus(`⚠️ Scan stopped at ${msg.nodeLimit} nodes. Narrow your selection for complete results.`);
+      else els.status.textContent = '';
       currentItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined, remoteText: undefined, status: undefined }));
       renderTable();
       pm({ type: 'get-namespaces' });
@@ -1341,6 +1343,7 @@ window.addEventListener('message', (event) => {
       break;
     }
     case 'assigned-result': {
+      if(msg.truncated) setStatus(`⚠️ Scan stopped at ${msg.nodeLimit} nodes. Narrow your selection for complete results.`);
       const incoming = Array.isArray(msg.items) ? msg.items : [];
       const incomingIds = new Set(incoming.map(it => it.nodeId));
       const curMap = new Map(currentItems.map(it => [it.nodeId, it]));

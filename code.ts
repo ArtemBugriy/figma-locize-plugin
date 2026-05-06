@@ -25,6 +25,7 @@ const PLUGIN_KEY_KEY = 'locize:key';
 const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
 const SELECTION_STORAGE_KEY = 'locize:selected';
 const DEFAULT_NS = 'UnknownFeatureNs';
+const MAX_SCAN_NODES = 250;
 
 // --- Storage helpers ---
 
@@ -81,11 +82,14 @@ function getSourceNodes(): readonly SceneNode[] {
     : figma.currentPage.children;
 }
 
-function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
+function collectTextNodes(nodes: readonly SceneNode[], limit = Infinity): { nodes: TextNode[]; truncated: boolean } {
   const result: TextNode[] = [];
   const stack: SceneNode[] = [...nodes];
+  let visited = 0;
   while (stack.length) {
+    if (visited >= limit) return { nodes: result, truncated: true };
     const node = stack.pop()!;
+    visited++;
     if (node.type === 'TEXT') {
       result.push(node as TextNode);
     } else if ('children' in node) {
@@ -94,7 +98,7 @@ function collectTextNodes(nodes: readonly SceneNode[]): TextNode[] {
       }
     }
   }
-  return result;
+  return { nodes: result, truncated: false };
 }
 
 function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
@@ -165,7 +169,8 @@ function nodeFontsReady(node: TextNode, failed: Set<string>): boolean {
 
 function collectAssignedNamespaces(): string[] {
   const set = new Set<string>();
-  for (const n of collectTextNodes(getSourceNodes())) {
+  const { nodes } = collectTextNodes(getSourceNodes(), MAX_SCAN_NODES);
+  for (const n of nodes) {
     const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
     if (fullKey) {
       const { namespace } = parseKey(fullKey);
@@ -176,7 +181,8 @@ function collectAssignedNamespaces(): string[] {
 }
 
 async function applyTranslations(map: TranslationMap, namespace: string) {
-  const targetNodes = collectTextNodes(getSourceNodes()).filter(n => n.getPluginData(PLUGIN_KEY_KEY));
+  const { nodes: allNodes } = collectTextNodes(getSourceNodes());
+  const targetNodes = allNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY));
   const failedFonts = await ensureFonts(targetNodes);
   let skipped = 0;
   for (const n of targetNodes) {
@@ -193,10 +199,10 @@ async function applyTranslations(map: TranslationMap, namespace: string) {
 }
 
 /** Build a ScanItem list for all text nodes with an assigned key in the current scope. */
-async function buildAssignedItems(namespace?: string): Promise<ScanItem[]> {
-  const textNodes = collectTextNodes(getSourceNodes());
+async function buildAssignedItems(namespace?: string): Promise<{ items: ScanItem[]; truncated: boolean }> {
+  const { nodes: textNodes, truncated } = collectTextNodes(getSourceNodes(), MAX_SCAN_NODES);
   const selMap = await getSelectionMap();
-  return textNodes
+  const items = textNodes
     .filter(n => n.getPluginData(PLUGIN_KEY_KEY))
     .map(n => {
       const fullKey = n.getPluginData(PLUGIN_KEY_KEY);
@@ -214,6 +220,7 @@ async function buildAssignedItems(namespace?: string): Promise<ScanItem[]> {
       };
     })
     .filter(i => !namespace || i.key.startsWith(namespace + '.'));
+  return { items, truncated };
 }
 
 // --- Plugin init ---
@@ -273,7 +280,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No selection' });
         break;
       }
-      const textNodes = collectTextNodes(selection as readonly SceneNode[]);
+      const { nodes: textNodes, truncated } = collectTextNodes(selection as readonly SceneNode[], MAX_SCAN_NODES);
       if (!textNodes.length) {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No text nodes found' });
         break;
@@ -283,7 +290,7 @@ figma.ui.onmessage = async (msg) => {
         const selMap = await getSelectionMap();
         for (const it of items) it.selected = selMap[it.nodeId] !== false;
       } catch (_) { /* clientStorage unavailable, default to all selected */ }
-      figma.ui.postMessage({ type: 'scan-result', items });
+      figma.ui.postMessage({ type: 'scan-result', items, truncated, nodeLimit: MAX_SCAN_NODES });
       break;
     }
     case 'apply-keys': {
@@ -310,8 +317,8 @@ figma.ui.onmessage = async (msg) => {
     }
     case 'get-assigned': {
       const namespace = msg.namespace || '';
-      const items = await buildAssignedItems(namespace);
-      figma.ui.postMessage({ type: 'assigned-result', items });
+      const { items, truncated } = await buildAssignedItems(namespace);
+      figma.ui.postMessage({ type: 'assigned-result', items, truncated, nodeLimit: MAX_SCAN_NODES });
       // Derive namespaces from already-traversed items when no filter is active,
       // avoiding a second full tree walk via collectAssignedNamespaces().
       const namespaces = namespace
@@ -333,8 +340,8 @@ figma.ui.onmessage = async (msg) => {
         }
       }));
       figma.notify('Names restored');
-      const items = await buildAssignedItems();
-      figma.ui.postMessage({ type: 'assigned-result', items });
+      const { items, truncated } = await buildAssignedItems();
+      figma.ui.postMessage({ type: 'assigned-result', items, truncated, nodeLimit: MAX_SCAN_NODES });
       const namespaces = Array.from(new Set(items.map(i => i.namespace).filter(Boolean))).sort() as string[];
       figma.ui.postMessage({ type: 'namespaces-result', namespaces });
       break;
