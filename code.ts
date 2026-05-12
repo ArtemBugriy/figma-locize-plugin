@@ -82,13 +82,14 @@ function getSourceNodes(): readonly SceneNode[] {
     : figma.currentPage.children;
 }
 
-function collectTextNodes(nodes: readonly SceneNode[], limit = Infinity): { nodes: TextNode[]; truncated: boolean } {
+function collectTextNodes(nodes: readonly SceneNode[], limit = Infinity, ignoreHidden = false): { nodes: TextNode[]; truncated: boolean } {
   const result: TextNode[] = [];
   const stack: SceneNode[] = [...nodes];
   let visited = 0;
   while (stack.length) {
     if (visited >= limit) return { nodes: result, truncated: true };
     const node = stack.pop()!;
+    if (ignoreHidden && !node.visible) continue;
     visited++;
     if (node.type === 'TEXT') {
       result.push(node as TextNode);
@@ -292,7 +293,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No selection' });
         break;
       }
-      const { nodes: textNodes, truncated } = collectTextNodes(selection as readonly SceneNode[], MAX_SCAN_NODES);
+      const { nodes: textNodes, truncated } = collectTextNodes(selection as readonly SceneNode[], MAX_SCAN_NODES, !!msg.ignoreHidden);
       if (!textNodes.length) {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No text nodes found' });
         break;

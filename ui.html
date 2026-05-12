@@ -189,6 +189,12 @@
           <div class="flex gap flex-wrap items-end">
             <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
             <button id="scanSelection" class="button-primary">Scan selection</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:24px;">
+            <label class="checkbox">
+              <input id="ignoreHidden" type="checkbox" checked />
+              <span>Ignore hidden layers</span>
+            </label>
             <label class="checkbox">
               <input id="hideUnchecked" type="checkbox" />
               <span>Hide unchecked</span>
@@ -279,6 +285,7 @@ const els = {
   restoreNames: document.getElementById('restoreNames'),
   nsListInfo: document.getElementById('nsListInfo'),
   hideUnchecked: document.getElementById('hideUnchecked'),
+  ignoreHidden: document.getElementById('ignoreHidden'),
   autotranslate: document.getElementById('autotranslate'),
   suggestNamespaces: document.getElementById('suggestNamespaces'),
   suggestKeys: document.getElementById('suggestKeys'),
@@ -682,16 +689,10 @@ function collectSettings(){
 }
 
 els.scanSelection.addEventListener('click', () => {
-  if (lastMode === 'scan') {
-    lastMode = null;
-    reflectMode();
-    setStatus('Scan mode off');
-    return;
-  }
   lastMode = 'scan';
   reflectMode();
   const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-  pm({ type: 'scan-selection', namespace: ns });
+  pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked });
 });
 
 els.hideUnchecked.addEventListener('change', () => {
@@ -1386,7 +1387,7 @@ window.addEventListener('message', (event) => {
     case 'selection-change': {
       if(lastMode === 'scan') {
         const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-        pm({ type: 'scan-selection', namespace: ns });
+        pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }
       break;
