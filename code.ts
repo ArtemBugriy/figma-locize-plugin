@@ -102,7 +102,7 @@ function collectTextNodes(nodes: readonly SceneNode[], limit = Infinity, ignoreH
   return { nodes: result, truncated: false };
 }
 
-function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
+function generateKeys(textNodes: TextNode[], namespace: string, mergeSameName = false): ScanItem[] {
   const used = new Set<string>();
   const items: ScanItem[] = [];
   for (const node of textNodes) {
@@ -115,8 +115,10 @@ function generateKeys(textNodes: TextNode[], namespace: string): ScanItem[] {
     } else {
       const candidate = node.name.trim() || 'text';
       let finalKey = candidate;
-      let i = 1;
-      while (used.has(finalKey)) { i += 1; finalKey = `${candidate}_${i}`; }
+      if (!mergeSameName) {
+        let i = 1;
+        while (used.has(finalKey)) { i += 1; finalKey = `${candidate}_${i}`; }
+      }
       key = `${namespace}.${finalKey}`;
       used.add(finalKey);
     }
@@ -298,7 +300,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'scan-result', items: [], warning: 'No text nodes found' });
         break;
       }
-      const items = generateKeys(textNodes, namespace);
+      const items = generateKeys(textNodes, namespace, !!msg.mergeSameName);
       try {
         const selMap = await getSelectionMap();
         for (const it of items) it.selected = selMap[it.nodeId] !== false;

@@ -196,8 +196,8 @@
               <span>Ignore hidden layers</span>
             </label>
             <label class="checkbox">
-              <input id="hideUnchecked" type="checkbox" />
-              <span>Hide unchecked</span>
+              <input id="mergeSameName" type="checkbox" checked />
+              <span>Merge nodes with same name</span>
             </label>
           </div>
           <div class="flex gap flex-wrap items-end mt-6px">
@@ -208,6 +208,10 @@
             <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
           </div>
           <div class="small my-6px">Keys are generated based on hierarchy and layer/text name.</div>
+          <label class="checkbox" style="margin-bottom:8px;">
+            <input id="hideUnchecked" type="checkbox" />
+            <span>Show only selected rows</span>
+          </label>
           <div class="table-container">
             <table id="keysTable">
               <thead>
@@ -286,6 +290,7 @@ const els = {
   nsListInfo: document.getElementById('nsListInfo'),
   hideUnchecked: document.getElementById('hideUnchecked'),
   ignoreHidden: document.getElementById('ignoreHidden'),
+  mergeSameName: document.getElementById('mergeSameName'),
   autotranslate: document.getElementById('autotranslate'),
   suggestNamespaces: document.getElementById('suggestNamespaces'),
   suggestKeys: document.getElementById('suggestKeys'),
@@ -692,7 +697,7 @@ els.scanSelection.addEventListener('click', () => {
   lastMode = 'scan';
   reflectMode();
   const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-  pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked });
+  pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
 });
 
 els.hideUnchecked.addEventListener('change', () => {
@@ -1387,7 +1392,7 @@ window.addEventListener('message', (event) => {
     case 'selection-change': {
       if(lastMode === 'scan') {
         const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-        pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked });
+        pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }
       break;
