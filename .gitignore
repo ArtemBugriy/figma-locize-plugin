@@ -7,3 +7,6 @@ node_modules
 out/
 dist/
 code.js
+
+# Local plans (not pushed to remote)
+plans/

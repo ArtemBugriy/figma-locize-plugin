@@ -44,6 +44,19 @@ type TranslationMap = { [fullKey: string]: string }
 
 Selection state stores **only unchecked** node IDs (`false`); all others are implicitly checked (compact storage).
 
+## Plan Mode Workflow
+When working in **plan mode**, before implementing:
+1. Create a separate markdown file in the `plans/` directory (e.g. `plans/<short-task-name>.md`). This folder is gitignored — plans stay local and are never pushed to remote.
+2. Write the full plan in that file as a checklist, breaking the work into ordered steps:
+   ```md
+   # <Plan title>
+   - [ ] Step 1 …
+   - [ ] Step 2 …
+   - [ ] Step 3 …
+   ```
+3. Work through the steps one by one. As each step is completed, mark it done by checking its box (`- [x]`).
+4. Keep the plan file in sync with actual progress so it always reflects current state.
+
 ## Build & Dev Workflow
 ```bash
 npm install          # install devDependencies (TypeScript, typings, eslint)
