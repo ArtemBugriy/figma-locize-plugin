@@ -189,22 +189,13 @@
 <body>
   <div class="tabs">
     <div class="tab-bar" role="tablist" aria-label="Main sections">
-      <button class="tab-btn active" role="tab" aria-selected="false" aria-controls="panel-keys" id="tab-keys">Key Management</button>
-      <button class="tab-btn" role="tab" aria-selected="true" aria-controls="panel-settings" id="tab-settings">Settings</button>
+      <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="panel-keys" id="tab-keys">Key Management</button>
+      <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-translate" id="tab-translate">Translation</button>
+      <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-settings" id="tab-settings">Settings</button>
       <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);">v8</span>
     </div>
     <div class="tab-panels" id="tabPanels">
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
-        <fieldset>
-          <legend>Language</legend>
-          <div class="flex gap flex-wrap justify-between items-end">
-            <label>Language<select id="languageSelect"></select></label>
-            <button id="updateTranslations" disabled>Update Translations</button>
-          </div>
-          <div class="small mt-6px">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
-          <div class="small mt-6px text-secondary" id="nsListInfo"></div>
-        </fieldset>
-
         <fieldset>
           <legend>Key management</legend>
           <div class="flex gap flex-wrap items-end">
@@ -270,6 +261,37 @@
           <div id="uploadProgress"><span></span></div>
         </fieldset>
       </div>
+      <div id="panel-translate" class="tab-panel" role="tabpanel" aria-labelledby="tab-translate">
+        <fieldset>
+          <legend>Language</legend>
+          <div class="flex gap flex-wrap justify-between items-end">
+            <label>Language<select id="languageSelect"></select></label>
+            <button id="updateTranslations" disabled>Update Translations</button>
+          </div>
+          <div class="small mt-6px">Namespaces are detected automatically from existing keys. If no keys are assigned, loading is skipped.</div>
+          <div class="small mt-6px text-secondary" id="nsListInfo"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Translatable nodes</legend>
+          <div class="small my-6px">Only nodes with an assigned key, found in the current selection, are shown here.</div>
+          <div class="table-container">
+            <table id="translateTable">
+              <thead>
+              <tr>
+                <th><input type="checkbox" id="translateSelectAll" aria-label="Select all" /></th>
+                <th>Key</th>
+                <th style="min-width: 150px;">Text on canvas</th>
+                <th style="min-width: 150px;">Translation</th>
+                <th>Status</th>
+              </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p id="translateExtraInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
+        </fieldset>
+      </div>
       <div id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
         <fieldset>
           <legend>Settings</legend>
@@ -324,13 +346,18 @@ const els = {
   tabPanels: document.getElementById('tabPanels'),
   tabButtons: Array.from(document.querySelectorAll('.tab-btn')), // new
   extraItemsInfo: document.getElementById('extraItemsInfo'), // new
+  translateTableBody: document.querySelector('#translateTable tbody'),
+  translateSelectAll: document.getElementById('translateSelectAll'),
+  translateExtraInfo: document.getElementById('translateExtraInfo'),
 };
 
 let currentItems = [];
+let translateItems = [];
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
 let lastMode = null;
+let activeTab = 'keys';
 
 // Track verification sequence and allow cancellation
 let verifyController = null; // AbortController | null
@@ -553,6 +580,60 @@ function itemStatusText(item) {
   return '—';
 }
 
+// Read-only table for the Translation tab: only keyed nodes in the current selection.
+function renderTranslateTable(){
+  els.translateTableBody.innerHTML = '';
+  const limitedItems = translateItems.slice(0, MAX_TABLE_ROWS);
+  const extraCount = Math.max(0, translateItems.length - limitedItems.length);
+  limitedItems.forEach((item) => {
+    const tr = document.createElement('tr');
+    const statusText = itemStatusText(item);
+    tr.className = statusText === '—' ? '' : statusText;
+
+    const tdSel = document.createElement('td');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = item.selected !== false;
+    cb.addEventListener('change', () => {
+      item.selected = cb.checked;
+      pm({ type: 'set-selected', nodeId: item.nodeId, selected: item.selected });
+      updateTranslateSelectAll();
+    });
+    tdSel.appendChild(cb);
+
+    const tdKey = document.createElement('td');
+    tdKey.textContent = item.key || '';
+
+    const tdText = document.createElement('td');
+    tdText.textContent = item.text ?? '';
+
+    const tdTrans = document.createElement('td');
+    tdTrans.textContent = item.remoteText ?? '';
+
+    const tdStatus = document.createElement('td');
+    tdStatus.textContent = statusText;
+
+    tr.appendChild(tdSel); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdTrans); tr.appendChild(tdStatus);
+    els.translateTableBody.appendChild(tr);
+  });
+  if (els.translateExtraInfo) {
+    if (extraCount > 0) {
+      els.translateExtraInfo.style.display = '';
+      els.translateExtraInfo.textContent = `+${extraCount} items`;
+    } else {
+      els.translateExtraInfo.style.display = 'none';
+      els.translateExtraInfo.textContent = '';
+    }
+  }
+  updateTranslateSelectAll();
+}
+
+function updateTranslateSelectAll(){
+  if(!els.translateSelectAll) return;
+  const shown = translateItems.slice(0, MAX_TABLE_ROWS);
+  els.translateSelectAll.checked = shown.length > 0 && shown.every(i => i.selected !== false);
+}
+
 function recomputeKey(item){
   const ns = (item.namespace||'').trim();
   const lk = (item.localKey||'').trim();
@@ -604,11 +685,15 @@ function scheduleStatusRefresh(){
 }
 
 async function refreshSyncStatus(){
+  return refreshSyncStatusFor(currentItems, renderTable);
+}
+
+async function refreshSyncStatusFor(items, renderFn){
   const seq = ++syncStatusSeq;
   const s = collectSettings();
   if(!currentLanguage){ currentLanguage = els.languageSelect.value || s.baseLanguage || 'en'; }
-  const nsSet = Array.from(new Set(currentItems.map(i => (i.namespace||'').trim()).filter(Boolean)));
-  if(!nsSet.length){ currentItems.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderTable(); return; }
+  const nsSet = Array.from(new Set(items.map(i => (i.namespace||'').trim()).filter(Boolean)));
+  if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(); return; }
   try {
     const baseLang = s.baseLanguage || 'en';
     // Ensure cache for required namespaces for current and base languages
@@ -626,7 +711,7 @@ async function refreshSyncStatus(){
     }
     if(seq !== syncStatusSeq) return;
     // Update items synced state using currentLanguage and baseLanguage translations
-    currentItems.forEach(item => {
+    items.forEach(item => {
       const ns = (item.namespace||'').trim();
       const lk = (item.localKey||'').trim();
       if(!ns || !lk){ item.synced = undefined; item.remoteText = undefined; item.status = undefined; return; }
@@ -677,10 +762,10 @@ async function refreshSyncStatus(){
   } catch(e){
     if(seq !== syncStatusSeq) return;
     setStatus('Status check failed: '+ (e && e.message ? e.message : e));
-    currentItems.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; });
+    items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; });
   }
   pruneRemoteCache();
-  renderTable();
+  renderFn();
 }
 
 // Settings load
@@ -751,6 +836,12 @@ els.selectAll.addEventListener('change', () => {
   currentItems.forEach(i => i.selected = els.selectAll.checked);
   pm({ type: 'set-selected-bulk', list: currentItems.map(i => ({ nodeId: i.nodeId, selected: i.selected !== false })) });
   renderTable();
+});
+
+els.translateSelectAll.addEventListener('change', () => {
+  translateItems.forEach(i => i.selected = els.translateSelectAll.checked);
+  pm({ type: 'set-selected-bulk', list: translateItems.map(i => ({ nodeId: i.nodeId, selected: i.selected !== false })) });
+  renderTranslateTable();
 });
 
 // Parse comma separated namespaces
@@ -1109,6 +1200,7 @@ els.languageSelect.addEventListener('change', async () => {
   const sTime = Date.now();
   clearRemoteCache();
   const baseLang = s.baseLanguage || 'en';
+  const selIds = translateItems.filter(i => i.selected !== false).map(i => i.nodeId);
   for(const ns of detectedNamespaces){
     try {
       setStatus('→ '+ns+' ...', true);
@@ -1116,7 +1208,7 @@ els.languageSelect.addEventListener('change', async () => {
       const flatMap = flattenToMap(translations);
       if(!remoteCache[lang]) remoteCache[lang] = {};
       remoteCache[lang][ns] = flatMap;
-      pm({ type: 'apply-language', map: flatMap, namespace: ns });
+      pm({ type: 'apply-language', map: flatMap, namespace: ns, nodeIds: selIds });
       if(baseLang !== lang){
         const baseTranslations = await fetchTranslations(s, baseLang, ns);
         const baseFlat = flattenToMap(baseTranslations);
@@ -1127,8 +1219,7 @@ els.languageSelect.addEventListener('change', async () => {
     } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
   }
   // Ask Figma to return current assigned items (to refresh node texts)
-  pm({ type: 'get-assigned' });
-  await refreshSyncStatus();
+  pm({ type: 'get-translatable' });
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
   // update suggestions if namespaces provided
   updateSuggestionsForCurrent();
@@ -1148,6 +1239,7 @@ els.updateTranslations.addEventListener('click', async () => {
   const sTime = Date.now();
   // Evict only the affected languages from cache so fresh data is fetched
   const baseLang = s.baseLanguage || 'en';
+  const selIds = translateItems.filter(i => i.selected !== false).map(i => i.nodeId);
   delete remoteCache[lang];
   if(baseLang !== lang) delete remoteCache[baseLang];
 
@@ -1158,7 +1250,7 @@ els.updateTranslations.addEventListener('click', async () => {
       const flatMap = flattenToMap(translations);
       if(!remoteCache[lang]) remoteCache[lang] = {};
       remoteCache[lang][ns] = flatMap;
-      pm({ type: 'apply-language', map: flatMap, namespace: ns });
+      pm({ type: 'apply-language', map: flatMap, namespace: ns, nodeIds: selIds });
       if(baseLang !== lang){
         const baseTranslations = await fetchTranslations(s, baseLang, ns);
         const baseFlat = flattenToMap(baseTranslations);
@@ -1169,8 +1261,7 @@ els.updateTranslations.addEventListener('click', async () => {
     } catch(e){ setStatus('✗ '+ns+': '+ (e && e.message ? e.message : e), true); }
   }
 
-  pm({ type: 'get-assigned' });
-  await refreshSyncStatus();
+  pm({ type: 'get-translatable' });
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
   updateSuggestionsForCurrent();
   els.updateTranslations.disabled = false;
@@ -1443,10 +1534,20 @@ window.addEventListener('message', (event) => {
       updateSuggestionsForCurrent();
       break;
     }
+    case 'translatable-result': {
+      if(msg.truncated) setStatus(`⚠️ Scan stopped at ${msg.nodeLimit} nodes. Narrow your selection for complete results.`);
+      translateItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined, remoteText: undefined, status: undefined }));
+      renderTranslateTable();
+      refreshSyncStatusFor(translateItems, renderTranslateTable);
+      break;
+    }
     case 'selection-change': {
       if(lastMode === 'scan') {
         const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
         pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
+      }
+      if(activeTab === 'translate') {
+        pm({ type: 'get-translatable' });
       }
       if(msg.namespaces){ updateNamespaces(msg.namespaces); }
       break;
@@ -1495,6 +1596,8 @@ reflectMode();
     els.tabButtons.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
     btn.classList.add('active'); btn.setAttribute('aria-selected','true');
     panel.classList.add('active');
+    activeTab = id;
+    if(id === 'translate') pm({ type: 'get-translatable' });
   }
   els.tabButtons.forEach(btn => {
     btn.addEventListener('click', () => activate(btn.id.replace('tab-','')));

@@ -183,9 +183,12 @@ function collectAssignedNamespaces(): string[] {
   return Array.from(set).sort();
 }
 
-async function applyTranslations(map: TranslationMap, namespace: string) {
+async function applyTranslations(map: TranslationMap, namespace: string, nodeIds?: string[]) {
   const { nodes: allNodes } = collectTextNodes(getSourceNodes());
-  const targetNodes = allNodes.filter(n => n.getPluginData(PLUGIN_KEY_KEY));
+  const idFilter = nodeIds && nodeIds.length ? new Set(nodeIds) : null;
+  const targetNodes = allNodes
+    .filter(n => n.getPluginData(PLUGIN_KEY_KEY))
+    .filter(n => !idFilter || idFilter.has(n.id));
   const failedFonts = await ensureFonts(targetNodes);
   let skipped = 0;
   for (const n of targetNodes) {
@@ -327,8 +330,17 @@ figma.ui.onmessage = async (msg) => {
       break;
     }
     case 'apply-language': {
-      await applyTranslations(msg.map as TranslationMap, msg.namespace as string);
+      await applyTranslations(msg.map as TranslationMap, msg.namespace as string, msg.nodeIds as string[] | undefined);
       figma.notify('Language applied');
+      break;
+    }
+    case 'get-translatable': {
+      // Same selection-scoped, keyed-only data as get-assigned, but a separate
+      // result type so the Translation tab never clobbers the Key tab's table.
+      const { items, truncated } = await buildAssignedItems();
+      figma.ui.postMessage({ type: 'translatable-result', items, truncated, nodeLimit: MAX_SCAN_NODES });
+      const namespaces = Array.from(new Set(items.map(i => i.namespace).filter(Boolean))).sort() as string[];
+      figma.ui.postMessage({ type: 'namespaces-result', namespaces });
       break;
     }
     case 'get-assigned': {
