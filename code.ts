@@ -318,11 +318,12 @@ figma.ui.onmessage = async (msg) => {
           if (!textNode.getPluginData(PLUGIN_ORIG_NAME_KEY)) {
             textNode.setPluginData(PLUGIN_ORIG_NAME_KEY, item.originalName || textNode.name);
           }
-          try { textNode.name = item.key; } catch (e) { console.error(e); }
+          // Layer name is intentionally left untouched — keep the hand-written name.
+          // The namespace/key live in plugin data only, and are shown in the table.
         }
       }));
       figma.ui.postMessage({ type: 'namespaces-result', namespaces: collectAssignedNamespaces() });
-      figma.notify('Keys applied and names updated');
+      figma.notify('Keys applied');
       break;
     }
     case 'apply-language': {

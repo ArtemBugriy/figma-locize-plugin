@@ -163,6 +163,27 @@
     padding: 6px 8px;
     color: var(--text-dim);
   }
+
+  /* Overflow ("⋯") action menu — collapses secondary actions behind a kebab button */
+  .overflow-menu { position: relative; display: inline-block; }
+  .overflow-trigger { padding: 4px 10px; font-size: 15px; line-height: 1; min-width: 34px; }
+  .overflow-menu-items {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 220px;
+    padding: 4px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-s);
+    box-shadow: 0 4px 10px rgba(0,0,0,.08);
+  }
+  .overflow-menu.open .overflow-menu-items { display: block; }
+  .overflow-item { display: block; width: 100%; text-align: left; white-space: nowrap; border-color: transparent; background: transparent; }
+  .overflow-item:not(:disabled):hover { background: var(--hover); }
+  .overflow-item + .overflow-item { margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -230,9 +251,14 @@
             </table>
           </div>
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
-          <div class="flex gap flex-wrap mt-6px">
+          <div class="flex gap flex-wrap mt-6px" style="align-items:center;">
             <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
-            <button id="restoreNames" disabled>Restore original node names</button>
+            <div class="overflow-menu" id="moreMenu" style="margin-left:auto;">
+              <button type="button" id="moreMenuTrigger" class="overflow-trigger" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
+              <div class="overflow-menu-items" role="menu" aria-label="More actions">
+                <button type="button" id="restoreNames" class="overflow-item" role="menuitem" disabled>Restore original node names</button>
+              </div>
+            </div>
           </div>
           <div class="flex gap flex-wrap mt-6px">
             <button id="uploadKeys" class="button-primary" disabled>Upload to locize</button>
@@ -1156,6 +1182,34 @@ els.restoreNames.addEventListener('click', () => {
   pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
   setStatus('Restoring names...');
 });
+
+// Overflow ("⋯") menus — generic open/close for collapsing secondary actions.
+// Any button with class "overflow-item" inside a ".overflow-menu" auto-closes the menu on click.
+(function initOverflowMenus(){
+  const menus = Array.from(document.querySelectorAll('.overflow-menu'));
+  function close(menu){
+    menu.classList.remove('open');
+    const t = menu.querySelector('.overflow-trigger');
+    if(t) t.setAttribute('aria-expanded', 'false');
+  }
+  function closeAll(except){ menus.forEach(m => { if(m !== except) close(m); }); }
+  menus.forEach(menu => {
+    const trigger = menu.querySelector('.overflow-trigger');
+    if(!trigger) return;
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = !menu.classList.contains('open');
+      closeAll(menu);
+      menu.classList.toggle('open', willOpen);
+      trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+    menu.querySelectorAll('.overflow-item').forEach(item => {
+      item.addEventListener('click', () => close(menu));
+    });
+  });
+  document.addEventListener('click', () => closeAll(null));
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeAll(null); });
+})();
 
 els.applyTopSuggestions.addEventListener('click', async () => {
   await updateSuggestionsForCurrent();
