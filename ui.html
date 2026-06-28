@@ -258,6 +258,7 @@
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px" style="align-items:center;">
             <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
+            <button id="clearKeys" disabled title="Remove the assigned locize key from the selected nodes">Clear keys</button>
             <div class="overflow-menu" id="moreMenu" style="margin-left:auto;">
               <button type="button" id="moreMenuTrigger" class="overflow-trigger" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
               <div class="overflow-menu-items" role="menu" aria-label="More actions">
@@ -341,6 +342,7 @@ const els = {
   activeProjectInfo: document.getElementById('activeProjectInfo'),
   scanSelection: document.getElementById('scanSelection'),
   applyKeys: document.getElementById('applyKeys'),
+  clearKeys: document.getElementById('clearKeys'),
   uploadKeys: document.getElementById('uploadKeys'),
   status: document.getElementById('status'),
   tableBody: document.querySelector('#keysTable tbody'),
@@ -422,7 +424,7 @@ function renderTable(){
   const limitedItems = itemsToRender.slice(0, MAX_TABLE_ROWS);
   const extraCount = Math.max(0, itemsToRender.length - limitedItems.length);
   limitedItems.forEach((item) => {
-    if(!item.namespace || !item.localKey){
+    if(!item.localKey){
       const dot = (item.key||'').indexOf('.')
       if(dot>-1){ item.namespace = item.key.slice(0,dot); item.localKey = item.key.slice(dot+1); } else { item.namespace = ''; item.localKey = item.key; }
     }
@@ -665,9 +667,11 @@ function updateButtons(){
     if(sel) noneSelected = false;
   }
   const anySelected = !noneSelected;
+  const anyBoundSelected = currentItems.some(i => i.selected !== false && i.existing);
   els.selectAll.indeterminate = !allSelected && !noneSelected;
   els.selectAll.checked = allSelected;
   els.applyKeys.disabled = !anySelected;
+  els.clearKeys.disabled = !anyBoundSelected;
   els.uploadKeys.disabled = !anySelected;
   els.restoreNames.disabled = !currentItems.length;
   els.applyTopSuggestions.disabled = !currentItems.length;
@@ -701,45 +705,48 @@ function scheduleStatusRefresh(){
 }
 
 async function refreshSyncStatus(){
-  return refreshSyncStatusFor(currentItems, renderTable);
+  // Key Management: status reflects whether the key exists in the project (base/source
+  // language) — a key with no full namespace+name match is "new" (missing/red).
+  return refreshSyncStatusFor(currentItems, renderTable, collectSettings().baseLanguage);
 }
 
-async function refreshSyncStatusFor(items, renderFn){
+async function refreshSyncStatusFor(items, renderFn, compareLang){
   const seq = ++syncStatusSeq;
   const s = collectSettings();
   if(!currentLanguage){ currentLanguage = els.languageSelect.value || s.baseLanguage || 'en'; }
+  const baseLang = s.baseLanguage || 'en';
+  const lang = compareLang || currentLanguage || baseLang;
   const nsSet = Array.from(new Set(items.map(i => (i.namespace||'').trim()).filter(Boolean)));
   if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(); return; }
   try {
-    const baseLang = s.baseLanguage || 'en';
-    // Ensure cache for required namespaces for current and base languages
-    if(!remoteCache[currentLanguage]) remoteCache[currentLanguage] = {};
+    // Ensure cache for required namespaces for the compared and base languages
+    if(!remoteCache[lang]) remoteCache[lang] = {};
     if(!remoteCache[baseLang]) remoteCache[baseLang] = {};
     for(const ns of nsSet){
-      if(!remoteCache[currentLanguage][ns]){
-        const data = await fetchTranslations(s, currentLanguage, ns);
-        remoteCache[currentLanguage][ns] = flattenToMap(data);
+      if(!remoteCache[lang][ns]){
+        try { remoteCache[lang][ns] = flattenToMap(await fetchTranslations(s, lang, ns)); }
+        catch(e){ if(String(e && e.message).includes('404')) remoteCache[lang][ns] = {}; else throw e; }
       }
       if(!remoteCache[baseLang][ns]){
-        const baseData = await fetchTranslations(s, baseLang, ns);
-        remoteCache[baseLang][ns] = flattenToMap(baseData);
+        try { remoteCache[baseLang][ns] = flattenToMap(await fetchTranslations(s, baseLang, ns)); }
+        catch(e){ if(String(e && e.message).includes('404')) remoteCache[baseLang][ns] = {}; else throw e; }
       }
     }
     if(seq !== syncStatusSeq) return;
-    // Update items synced state using currentLanguage and baseLanguage translations
+    // Update items synced state against the compared language vs the base language
     items.forEach(item => {
       const ns = (item.namespace||'').trim();
       const lk = (item.localKey||'').trim();
       if(!ns || !lk){ item.synced = undefined; item.remoteText = undefined; item.status = undefined; return; }
-      const curMap = (remoteCache[currentLanguage] || {})[ns] || {};
-      const baseMap = (remoteCache[s.baseLanguage || 'en'] || {})[ns] || {};
+      const curMap = (remoteCache[lang] || {})[ns] || {};
+      const baseMap = (remoteCache[baseLang] || {})[ns] || {};
       const hasRemote = Object.prototype.hasOwnProperty.call(curMap, lk);
       const hasBase = Object.prototype.hasOwnProperty.call(baseMap, lk);
       const remote = hasRemote ? curMap[lk] : undefined;
       item.remoteText = remote;
       const local = String(item.text ?? '');
 
-      if(currentLanguage !== (s.baseLanguage || 'en')){
+      if(lang !== baseLang){
         if(!hasBase && !hasRemote){
           item.status = 'missing';
           item.synced = false;
@@ -921,6 +928,13 @@ els.applyKeys.addEventListener('click', () => {
   const items = currentItems.filter(i => i.selected !== false).map(i => ({ ...i }));
   pm({ type: 'apply-keys', items });
   scheduleStatusRefresh();
+});
+
+els.clearKeys.addEventListener('click', () => {
+  const targets = currentItems.filter(i => i.selected !== false && i.existing);
+  if(!targets.length) return;
+  pm({ type: 'clear-keys', items: targets.map(t => ({ nodeId: t.nodeId })) });
+  setStatus('Clearing keys...');
 });
 
 els.uploadKeys.addEventListener('click', async () => {
@@ -1632,6 +1646,24 @@ window.addEventListener('message', (event) => {
       refreshActiveProject();
       break;
     }
+    case 'keys-cleared': {
+      // Zero the cleared rows in place: unbound, empty namespace (so no sync color),
+      // node's restored name kept as the proposed local key. No re-scan, no refresh.
+      const names = new Map((msg.items || []).map(x => [x.nodeId, x.name]));
+      currentItems.forEach(it => {
+        if(names.has(it.nodeId)){
+          if(names.get(it.nodeId)) it.name = names.get(it.nodeId);
+          it.existing = false;
+          it.namespace = '';
+          it.localKey = it.name || '';
+          it.key = it.name || '';
+          it.synced = undefined; it.remoteText = undefined; it.status = undefined;
+        }
+      });
+      renderTable();
+      setStatus(`Cleared ${names.size} node(s)`);
+      break;
+    }
     case 'scan-result': {
       if(msg.warning) setStatus(msg.warning);
       else if(msg.truncated) setStatus(`⚠️ Scan stopped at ${msg.nodeLimit} nodes. Narrow your selection for complete results.`);
@@ -1678,7 +1710,7 @@ window.addEventListener('message', (event) => {
       if(msg.truncated) setStatus(`⚠️ Scan stopped at ${msg.nodeLimit} nodes. Narrow your selection for complete results.`);
       translateItems = (msg.items || []).map(it => ({ ...it, selected: it.selected !== false, synced: undefined, remoteText: undefined, status: undefined }));
       renderTranslateTable();
-      refreshSyncStatusFor(translateItems, renderTranslateTable);
+      refreshSyncStatusFor(translateItems, renderTranslateTable, currentLanguage);
       break;
     }
     case 'selection-change': {
