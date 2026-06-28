@@ -7,6 +7,12 @@ interface Settings {
   baseLanguage: string;
 }
 
+interface Project extends Settings {
+  id: string;
+  name: string;
+  lastNamespace?: string;
+}
+
 interface ScanItem {
   nodeId: string;
   name: string;
@@ -24,10 +30,52 @@ interface TranslationMap { [key: string]: string; }
 const PLUGIN_KEY_KEY = 'locize:key';
 const PLUGIN_ORIG_NAME_KEY = 'locize:origName';
 const SELECTION_STORAGE_KEY = 'locize:selected';
+const PROJECTS_STORAGE_KEY = 'locize:projects';
+const ACTIVE_PROJECT_STORAGE_KEY = 'locize:activeProjectId';
 const DEFAULT_NS = 'UnknownFeatureNs';
 const MAX_SCAN_NODES = 250;
 
 // --- Storage helpers ---
+
+/** Load the saved projects list, migrating a legacy single-project setup on first run. */
+async function loadProjects(): Promise<{ projects: Project[]; activeProjectId: string }> {
+  const raw = await figma.clientStorage.getAsync(PROJECTS_STORAGE_KEY);
+  let projects: Project[] = Array.isArray(raw) ? raw as Project[] : [];
+  if (!projects.length) {
+    // Migrate from the legacy single-project keys, if present.
+    const [projectId, apiKey, version, baseLanguage] = await Promise.all([
+      figma.clientStorage.getAsync('locize.projectId'),
+      figma.clientStorage.getAsync('locize.apiKey'),
+      figma.clientStorage.getAsync('locize.version'),
+      figma.clientStorage.getAsync('locize.baseLanguage'),
+    ]);
+    if (projectId) {
+      projects = [{
+        id: 'p_legacy',
+        name: 'Project 1',
+        projectId: String(projectId || ''),
+        apiKey: String(apiKey || ''),
+        version: String(version || 'latest'),
+        baseLanguage: String(baseLanguage || 'en'),
+      }];
+    }
+  }
+  let activeProjectId = String((await figma.clientStorage.getAsync(ACTIVE_PROJECT_STORAGE_KEY)) || '');
+  if (!projects.some(p => p.id === activeProjectId)) activeProjectId = projects[0] ? projects[0].id : '';
+  return { projects, activeProjectId };
+}
+
+/** Mirror the active project's creds into the legacy keys so anything reading them stays valid. */
+async function mirrorActiveToLegacy(projects: Project[], activeProjectId: string): Promise<void> {
+  const p = projects.find(x => x.id === activeProjectId);
+  if (!p) return;
+  await Promise.all([
+    figma.clientStorage.setAsync('locize.projectId', p.projectId),
+    figma.clientStorage.setAsync('locize.apiKey', p.apiKey),
+    figma.clientStorage.setAsync('locize.version', p.version),
+    figma.clientStorage.setAsync('locize.baseLanguage', p.baseLanguage),
+  ]);
+}
 
 async function getSelectionMap(): Promise<Record<string, boolean>> {
   const v = await figma.clientStorage.getAsync(SELECTION_STORAGE_KEY);
@@ -265,30 +313,36 @@ figma.on('selectionchange', () => {
 figma.ui.onmessage = async (msg) => {
   switch (msg.type) {
     case 'load-settings': {
-      const [projectId, apiKey, version, baseLanguage] = await Promise.all([
-        figma.clientStorage.getAsync('locize.projectId'),
-        figma.clientStorage.getAsync('locize.apiKey'),
-        figma.clientStorage.getAsync('locize.version'),
-        figma.clientStorage.getAsync('locize.baseLanguage'),
-      ]);
-      const settings: Settings = {
-        projectId: String(projectId || ''),
-        apiKey: String(apiKey || ''),
-        version: String(version || 'latest'),
-        baseLanguage: String(baseLanguage || 'en'),
-      };
-      figma.ui.postMessage({ type: 'settings-loaded', settings });
+      const { projects, activeProjectId } = await loadProjects();
+      figma.ui.postMessage({ type: 'settings-loaded', projects, activeProjectId });
       break;
     }
-    case 'save-settings': {
-      const s: Settings = msg.settings;
-      await Promise.all([
-        figma.clientStorage.setAsync('locize.projectId', s.projectId),
-        figma.clientStorage.setAsync('locize.apiKey', s.apiKey),
-        figma.clientStorage.setAsync('locize.version', s.version),
-        figma.clientStorage.setAsync('locize.baseLanguage', s.baseLanguage),
-      ]);
-      figma.notify('Settings saved');
+    case 'save-projects': {
+      const projects: Project[] = Array.isArray(msg.projects) ? msg.projects : [];
+      const activeProjectId: string = String(msg.activeProjectId || (projects[0] ? projects[0].id : ''));
+      await figma.clientStorage.setAsync(PROJECTS_STORAGE_KEY, projects);
+      await figma.clientStorage.setAsync(ACTIVE_PROJECT_STORAGE_KEY, activeProjectId);
+      await mirrorActiveToLegacy(projects, activeProjectId);
+      figma.notify('Projects saved');
+      break;
+    }
+    case 'set-active-project': {
+      const activeProjectId: string = String(msg.activeProjectId || '');
+      await figma.clientStorage.setAsync(ACTIVE_PROJECT_STORAGE_KEY, activeProjectId);
+      const { projects } = await loadProjects();
+      await mirrorActiveToLegacy(projects, activeProjectId);
+      break;
+    }
+    case 'set-project-namespace': {
+      // Lightweight persist of a project's last-used namespace (no notify).
+      const id: string = String(msg.id || '');
+      const raw = await figma.clientStorage.getAsync(PROJECTS_STORAGE_KEY);
+      const list: Project[] = Array.isArray(raw) ? raw as Project[] : [];
+      const p = list.find(x => x.id === id);
+      if (p) {
+        p.lastNamespace = String(msg.namespace || '');
+        await figma.clientStorage.setAsync(PROJECTS_STORAGE_KEY, list);
+      }
       break;
     }
     case 'scan-selection': {

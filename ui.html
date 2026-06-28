@@ -184,6 +184,13 @@
   .overflow-item { display: block; width: 100%; text-align: left; white-space: nowrap; border-color: transparent; background: transparent; }
   .overflow-item:not(:disabled):hover { background: var(--hover); }
   .overflow-item + .overflow-item { margin-top: 2px; }
+
+  /* Project cards (Settings tab) */
+  .project-card { position: relative; border: 1px solid var(--border); border-radius: var(--radius-m); padding: 10px 12px; background: var(--bg); }
+  .project-card + .project-card { margin-top: 8px; }
+  .project-card .project-remove { position: absolute; top: 6px; right: 6px; min-width: 24px; padding: 2px 6px; line-height: 1; }
+  .project-card .project-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .project-card label { min-width: 0; }
 </style>
 </head>
 <body>
@@ -196,6 +203,13 @@
     </div>
     <div class="tab-panels" id="tabPanels">
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
+        <fieldset>
+          <legend>Project</legend>
+          <div class="flex gap flex-wrap items-end">
+            <label class="grow">Active project<select id="projectSelect"></select></label>
+          </div>
+          <div class="small mt-6px text-secondary" id="activeProjectInfo"></div>
+        </fieldset>
         <fieldset>
           <legend>Key management</legend>
           <div class="flex gap flex-wrap items-end">
@@ -294,15 +308,14 @@
       </div>
       <div id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
         <fieldset>
-          <legend>Settings</legend>
-          <div class="flex gap flex-wrap items-end">
-            <label class="grow">Project ID<input id="projectId" type="text" placeholder="project id" /></label>
-            <label class="grow">API Key (write)<input id="apiKey" type="password" placeholder="write api key" /></label>
-            <label>Version<input id="version" type="text" value="latest" /></label>
-            <label>Base Lang<input id="baseLanguage" type="text" value="en" /></label>
-            <button id="saveSettings" class="button-primary">Save</button>
+          <legend>Projects</legend>
+          <div id="projectsList"></div>
+          <p id="projectsEmpty" class="small text-secondary" style="display:none;">No projects yet. Click “Add project” to create one.</p>
+          <div class="flex gap flex-wrap mt-12px">
+            <button id="addProject">+ Add project</button>
+            <button id="saveProjects" class="button-primary">Save</button>
           </div>
-          <div class="small mt-12px">Data is saved locally in the plugin clientStorage.</div>
+          <div class="small mt-12px">Data is saved locally in the plugin clientStorage. Switch the active project in the Key Management tab.</div>
         </fieldset>
       </div>
     </div>
@@ -319,12 +332,13 @@
 
 <script>
 const els = {
-  projectId: document.getElementById('projectId'),
-  apiKey: document.getElementById('apiKey'),
-  version: document.getElementById('version'),
-  baseLanguage: document.getElementById('baseLanguage'),
   scanNamespace: document.getElementById('scanNamespace'),
-  saveSettings: document.getElementById('saveSettings'),
+  projectsList: document.getElementById('projectsList'),
+  projectsEmpty: document.getElementById('projectsEmpty'),
+  addProject: document.getElementById('addProject'),
+  saveProjects: document.getElementById('saveProjects'),
+  projectSelect: document.getElementById('projectSelect'),
+  activeProjectInfo: document.getElementById('activeProjectInfo'),
   scanSelection: document.getElementById('scanSelection'),
   applyKeys: document.getElementById('applyKeys'),
   uploadKeys: document.getElementById('uploadKeys'),
@@ -353,6 +367,8 @@ const els = {
 
 let currentItems = [];
 let translateItems = [];
+let projects = [];
+let activeProjectId = '';
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
@@ -370,7 +386,7 @@ function clearRemoteCache() {
   for (const k in remoteCache) delete remoteCache[k];
 }
 function pruneRemoteCache() {
-  const baseLang = els.baseLanguage.value.trim() || 'en';
+  const baseLang = collectSettings().baseLanguage;
   const keep = new Set([currentLanguage || baseLang, baseLang]);
   for (const lang of Object.keys(remoteCache)) {
     if (!keep.has(lang)) delete remoteCache[lang];
@@ -771,44 +787,129 @@ async function refreshSyncStatusFor(items, renderFn){
 // Settings load
 pm({ type: 'load-settings' });
 
-els.saveSettings.addEventListener('click', async () => {
-  const s = collectSettings();
-  if(!validateSettings(s)) { pm({ type:'notify', message:'ProjectId and ApiKey are required' }); return; }
-  if(verifyController) { try { verifyController.abort(); } catch(_){} }
-  verifyController = new AbortController();
-  const seq = ++verifySeq;
-  els.saveSettings.disabled = true;
-  const ok = await verifyCredentials(s, verifyController.signal, seq);
-  if(seq !== verifySeq) { return; }
-  els.saveSettings.disabled = false;
-  if(ok){
-    pm({ type: 'save-settings', settings: s });
-    if(!els.scanNamespace.value) els.scanNamespace.value = DEFAULT_NS;
-    fetchLanguagesList();
-    pm({ type: 'get-namespaces' });
-    scheduleStatusRefresh();
-    updateAutotranslateAvailability();
-    // preload namespaces list for suggestions
-    ensureNamespaceSuggestionsLoaded();
-  } else {
-    pm({ type:'notify', message:'Invalid Locize credentials' });
-  }
-});
-
+// Active project's credentials — the single source all API calls read from.
 function collectSettings(){
+  const p = projects.find(x => x.id === activeProjectId) || {};
   return {
-    projectId: els.projectId.value.trim(),
-    apiKey: els.apiKey.value.trim(),
-    version: els.version.value.trim() || 'latest',
-    baseLanguage: els.baseLanguage.value.trim() || 'en',
+    projectId: (p.projectId || '').trim(),
+    apiKey: (p.apiKey || '').trim(),
+    version: (p.version || '').trim() || 'latest',
+    baseLanguage: (p.baseLanguage || '').trim() || 'en',
   };
 }
+
+// Re-target the whole plugin to the active project's creds.
+function refreshActiveProject(){
+  if(!els.scanNamespace.value) els.scanNamespace.value = DEFAULT_NS;
+  fetchLanguagesList();
+  pm({ type: 'get-namespaces' });
+  scheduleStatusRefresh();
+  updateAutotranslateAvailability();
+  ensureNamespaceSuggestionsLoaded();
+}
+
+function genProjectId(){ return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+// Render the Settings cards + keep the Key Management dropdown in sync.
+function renderProjectsUI(){
+  els.projectsList.innerHTML = '';
+  projects.forEach((p) => {
+    const card = document.createElement('div');
+    card.className = 'project-card';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'project-remove';
+    remove.title = 'Remove project';
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      const wasActive = activeProjectId === p.id;
+      projects = projects.filter(x => x.id !== p.id);
+      if(wasActive) activeProjectId = projects[0] ? projects[0].id : '';
+      renderProjectsUI();
+      if(wasActive) applyActiveProjectNamespace();
+    });
+    card.appendChild(remove);
+
+    const mk = (labelText, key, type, grow) => {
+      const label = document.createElement('label');
+      if(grow) label.className = 'grow';
+      label.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = type || 'text';
+      input.value = p[key] || '';
+      input.addEventListener('input', () => {
+        p[key] = input.value;
+        if(key === 'name') renderProjectSelect();
+      });
+      label.appendChild(input);
+      return label;
+    };
+
+    const row1 = document.createElement('div');
+    row1.className = 'project-row';
+    row1.appendChild(mk('Name', 'name', 'text', true));
+    row1.appendChild(mk('Project ID', 'projectId', 'text', true));
+    card.appendChild(row1);
+
+    const row2 = document.createElement('div');
+    row2.className = 'project-row';
+    row2.appendChild(mk('API Key (write)', 'apiKey', 'password', true));
+    row2.appendChild(mk('Version', 'version'));
+    row2.appendChild(mk('Base Lang', 'baseLanguage'));
+    card.appendChild(row2);
+
+    els.projectsList.appendChild(card);
+  });
+  if(els.projectsEmpty) els.projectsEmpty.style.display = projects.length ? 'none' : '';
+  renderProjectSelect();
+}
+
+// Sync the Key Management active-project dropdown + info line.
+function renderProjectSelect(){
+  if(!els.projectSelect) return;
+  els.projectSelect.innerHTML = projects.map(p =>
+    `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.projectId || 'Untitled')}</option>`
+  ).join('');
+  if(activeProjectId) els.projectSelect.value = activeProjectId;
+  const active = projects.find(p => p.id === activeProjectId);
+  if(els.activeProjectInfo) els.activeProjectInfo.textContent = active ? ('Project ID: ' + (active.projectId || '—')) : 'No active project';
+}
+
+els.addProject.addEventListener('click', () => {
+  const p = { id: genProjectId(), name: '', projectId: '', apiKey: '', version: 'latest', baseLanguage: 'en', lastNamespace: '' };
+  projects.push(p);
+  activeProjectId = p.id;
+  renderProjectsUI();
+  applyActiveProjectNamespace();
+  const lastCard = els.projectsList.lastElementChild;
+  const nameInput = lastCard && lastCard.querySelector('input');
+  if(nameInput) nameInput.focus();
+});
+
+els.saveProjects.addEventListener('click', () => {
+  if(!activeProjectId && projects[0]) activeProjectId = projects[0].id;
+  pm({ type: 'save-projects', projects, activeProjectId });
+  renderProjectSelect();
+  refreshActiveProject();
+  setStatus('Projects saved');
+});
+
+els.projectSelect.addEventListener('change', () => {
+  activeProjectId = els.projectSelect.value;
+  pm({ type: 'set-active-project', activeProjectId });
+  renderProjectSelect();
+  applyActiveProjectNamespace();
+  clearRemoteCache();
+  refreshActiveProject();
+});
 
 els.scanSelection.addEventListener('click', () => {
   lastMode = 'scan';
   reflectMode();
   const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
   pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
+  persistScanNamespace();
 });
 
 els.hideUnchecked.addEventListener('change', () => {
@@ -985,7 +1086,7 @@ async function updateSuggestionsForCurrent(){
 // =====================
 const nsSuggestCache = {}; // key: `${projectId}|${version}|${language}` -> string[] namespaces
 let nsDropdownEl = null;
-let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '' };
+let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '', onPick: null };
 
 function getNsCacheKey(s, lang){
   return `${s.projectId}|${s.version}|${lang}`;
@@ -1086,17 +1187,18 @@ function renderNsDropdown(items){
       const it = document.createElement('div');
       it.className = 'ns-suggest-item' + (idx === nsDropdownState.activeIndex ? ' active' : '');
       it.textContent = ns;
-      it.addEventListener('mousedown', (e) => { e.preventDefault(); commitNamespaceChoice(ns); });
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); if(nsDropdownState.onPick) nsDropdownState.onPick(ns); });
       el.appendChild(it);
     });
   }
 }
 
-function openNsDropdown(anchor, items){
+function openNsDropdown(anchor, items, onPick){
   nsDropdownState.open = true;
   nsDropdownState.items = items;
   nsDropdownState.activeIndex = items.length ? 0 : -1;
   nsDropdownState.anchor = anchor;
+  nsDropdownState.onPick = onPick || null;
   positionDropdown(anchor);
   renderNsDropdown(items);
   nsDropdownEl.style.display = 'block';
@@ -1157,7 +1259,7 @@ function onSuggestInputChange(){
     const { cur } = getLastTokenInfo();
     const filtered = filterNsItems(list, cur);
     if(document.activeElement === els.suggestNamespaces){
-      if(!nsDropdownState.open) openNsDropdown(els.suggestNamespaces, filtered);
+      if(!nsDropdownState.open) openNsDropdown(els.suggestNamespaces, filtered, commitNamespaceChoice);
       else updateNsDropdown(els.suggestNamespaces, filtered);
     }
   })().catch(e => setStatus('Namespace load failed: ' + (e && e.message ? e.message : e)));
@@ -1168,7 +1270,7 @@ function onSuggestInputFocus(){
     const list = await ensureNamespaceSuggestionsLoaded();
     const { cur } = getLastTokenInfo();
     const filtered = filterNsItems(list, cur);
-    if(filtered.length){ openNsDropdown(els.suggestNamespaces, filtered); }
+    if(filtered.length){ openNsDropdown(els.suggestNamespaces, filtered, commitNamespaceChoice); }
   })().catch(() => {});
 }
 
@@ -1177,7 +1279,7 @@ function onSuggestInputKeydown(e){
   if(e.key === 'ArrowDown'){ e.preventDefault(); moveActive(1); }
   else if(e.key === 'ArrowUp'){ e.preventDefault(); moveActive(-1); }
   else if(e.key === 'Enter' || e.key === 'Tab'){
-    if(nsDropdownState.activeIndex >= 0){ e.preventDefault(); const ns = nsDropdownState.items[nsDropdownState.activeIndex]; commitNamespaceChoice(ns); }
+    if(nsDropdownState.activeIndex >= 0){ e.preventDefault(); const ns = nsDropdownState.items[nsDropdownState.activeIndex]; if(nsDropdownState.onPick) nsDropdownState.onPick(ns); }
   } else if(e.key === 'Escape'){ closeNsDropdown(); }
 }
 
@@ -1188,6 +1290,51 @@ els.suggestNamespaces.addEventListener('keydown', onSuggestInputKeydown);
 els.suggestNamespaces.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
 window.addEventListener('resize', ()=> positionDropdown(nsDropdownState.anchor));
 window.addEventListener('scroll', ()=> positionDropdown(nsDropdownState.anchor), true);
+
+// "Namespace for new keys" — single-value autocomplete from the active project's
+// existing namespaces, plus per-project persistence so it survives plugin reloads.
+function commitScanNamespace(ns){
+  els.scanNamespace.value = ns;
+  closeNsDropdown();
+  persistScanNamespace();
+}
+
+function persistScanNamespace(){
+  const v = (els.scanNamespace.value || '').trim();
+  const p = projects.find(x => x.id === activeProjectId);
+  if(p){ p.lastNamespace = v; pm({ type: 'set-project-namespace', id: activeProjectId, namespace: v }); }
+}
+
+// Restore the field from the active project's last-used namespace (or default).
+function applyActiveProjectNamespace(){
+  const p = projects.find(x => x.id === activeProjectId);
+  els.scanNamespace.value = (p && p.lastNamespace) || DEFAULT_NS;
+}
+
+function onScanNsFocus(){
+  (async () => {
+    const list = await ensureNamespaceSuggestionsLoaded();
+    const filtered = filterNsItems(list, (els.scanNamespace.value || '').trim());
+    if(filtered.length){ openNsDropdown(els.scanNamespace, filtered, commitScanNamespace); }
+  })().catch(() => {});
+}
+
+function onScanNsInput(){
+  (async () => {
+    const list = await ensureNamespaceSuggestionsLoaded();
+    if(!list || !list.length){ closeNsDropdown(); return; }
+    const filtered = filterNsItems(list, (els.scanNamespace.value || '').trim());
+    if(document.activeElement === els.scanNamespace){
+      if(!nsDropdownState.open) openNsDropdown(els.scanNamespace, filtered, commitScanNamespace);
+      else updateNsDropdown(els.scanNamespace, filtered);
+    }
+  })().catch(() => {});
+}
+
+els.scanNamespace.addEventListener('focus', onScanNsFocus);
+els.scanNamespace.addEventListener('input', onScanNsInput);
+els.scanNamespace.addEventListener('keydown', onSuggestInputKeydown);
+els.scanNamespace.addEventListener('blur', () => { setTimeout(closeNsDropdown, 120); persistScanNamespace(); });
 
 els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
@@ -1478,18 +1625,11 @@ window.addEventListener('message', (event) => {
   if(!msg) return;
   switch(msg.type){
     case 'settings-loaded': {
-      const s = msg.settings;
-      els.projectId.value = s.projectId || '';
-      els.apiKey.value = s.apiKey || '';
-      els.version.value = s.version || 'latest';
-      els.baseLanguage.value = s.baseLanguage || 'en';
-      if(!els.scanNamespace.value) els.scanNamespace.value = DEFAULT_NS;
-      fetchLanguagesList();
-      pm({ type: 'get-namespaces' });
-      scheduleStatusRefresh();
-      updateAutotranslateAvailability();
-      // preload namespaces list for suggestions
-      ensureNamespaceSuggestionsLoaded();
+      projects = Array.isArray(msg.projects) ? msg.projects : [];
+      activeProjectId = msg.activeProjectId || (projects[0] ? projects[0].id : '');
+      renderProjectsUI();
+      applyActiveProjectNamespace();
+      refreshActiveProject();
       break;
     }
     case 'scan-result': {
