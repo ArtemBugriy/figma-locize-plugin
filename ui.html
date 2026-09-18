@@ -1530,24 +1530,58 @@ async function uploadSelectedKeys(items, s){
     if(!byNs.has(ns)) byNs.set(ns, []);
     byNs.get(ns).push({ key: local, value: String(it.text ?? '') });
   }
-  const totalKeys = Array.from(byNs.values()).reduce((acc, arr) => acc + arr.length, 0);
-  if(totalKeys === 0){ setStatus('Nothing to upload'); return; }
+  if(byNs.size === 0){ setStatus('Nothing to upload'); return; }
 
-  setStatus(`Uploading keys to ${lang} (bulk update)${doAutotranslate ? ' [autotranslate]' : ''}...`);
+  setStatus(`Checking ${byNs.size} namespace(s) for new/changed values...`);
+
+  // Diff against what's currently in locize before sending anything. A key whose
+  // value is unchanged is skipped entirely (not sent at all) -- per locize's API,
+  // "a value pushed without the needsReview field confirms that key", so re-sending
+  // unchanged content would silently clear a needsReview flag someone else set.
+  // Anything new or actually different gets needsReview:true, so it surfaces in
+  // locize's own review queue without touching the key name.
+  const nsPayloads = [];
+  for(const [ns, entries] of byNs.entries()){
+    let currentMap = {};
+    try {
+      currentMap = flattenToMap(await fetchTranslations(s, lang, ns));
+    } catch(e){
+      if(!String(e && e.message ? e.message : e).includes('404')){
+        setStatus(`✗ ${ns}: couldn't read current translations (${e && e.message ? e.message : e})`, true);
+        continue;
+      }
+      // 404 = namespace doesn't exist yet in this language -> everything below is new.
+    }
+    const payload = {};
+    let changed = 0;
+    for(const { key, value } of entries){
+      const current = Object.prototype.hasOwnProperty.call(currentMap, key) ? currentMap[key] : undefined;
+      if(current === value) continue; // unchanged -> don't touch it
+      payload[key] = { value, needsReview: true };
+      changed++;
+    }
+    const skipped = entries.length - changed;
+    if(changed > 0) nsPayloads.push({ ns, payload, changed, skipped });
+    else setStatus(`${ns}: nothing changed (${skipped} unchanged), skipped`, true);
+  }
+
+  const totalKeys = nsPayloads.reduce((acc, p) => acc + p.changed, 0);
+  if(totalKeys === 0){ setStatus('Nothing to upload (no new or changed values)'); return; }
+
+  setStatus(`Uploading ${totalKeys} new/changed key(s) to ${lang} (bulk update)${doAutotranslate ? ' [autotranslate]' : ''}...`);
   let sentKeys = 0;
   setProgress(0);
-  for(const [ns, entries] of byNs.entries()){
-    setStatus(`Namespace ${ns}: ${entries.length} key(s)` , true);
+  for(const { ns, payload, changed, skipped } of nsPayloads){
+    setStatus(`Namespace ${ns}: ${changed} new/changed key(s)${skipped ? `, ${skipped} unchanged (skipped)` : ''}`, true);
     // chunk to 1000 keys per request
-    for(const chunk of chunkArray(entries, 1000)){
-      const payload = {};
-      for(const {key, value} of chunk){ payload[key] = value; }
+    for(const chunkEntries of chunkArray(Object.entries(payload), 1000)){
+      const chunkPayload = Object.fromEntries(chunkEntries);
       try {
-        const resInfo = await updateTranslationsBatch(s, lang, ns, payload, doAutotranslate);
-        sentKeys += chunk.length;
+        const resInfo = await updateTranslationsBatch(s, lang, ns, chunkPayload, doAutotranslate);
+        sentKeys += chunkEntries.length;
         setProgress(sentKeys/totalKeys*100);
         const note = resInfo?.note ? ` (${resInfo.note})` : '';
-        setStatus(`✓ ${ns}: +${chunk.length} translations${note}`, true);
+        setStatus(`✓ ${ns}: +${chunkEntries.length} translations${note}`, true);
       } catch(e){
         setStatus(`✗ ${ns}: ${e && e.message ? e.message : e}`, true);
       }
@@ -1555,7 +1589,7 @@ async function uploadSelectedKeys(items, s){
   }
   clearRemoteCache();
   await refreshSyncStatus();
-  setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys}`, true);
+  setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys} (new/changed)`, true);
 }
 
 function setProgress(percent){
