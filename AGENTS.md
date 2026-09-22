@@ -20,7 +20,7 @@ Figma plugins run in two isolated JS contexts that can only communicate via `pos
 Key message types (defined in `code.ts` switch and `ui.html` handler):
 - `load-settings` / `settings-loaded` — load credentials from clientStorage
 - `scan-selection` → `scan-result` — collect TEXT nodes and generate keys
-- `apply-keys` — write `locize:key` plugin data to nodes, rename layers
+- `apply-keys` → `keys-applied` — write `locize:key` plugin data to nodes, rename layers to `localKey (namespace)`; the reply carries the names actually written plus a `renameFailed` count
 - `get-assigned` → `assigned-result` — fetch already-keyed nodes
 - `apply-language` — apply a `TranslationMap` to nodes' `.characters`
 - `update-text` — live-edit a single node's text from the table
@@ -75,6 +75,7 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 
 ## Conventions & Patterns
 - **Default namespace fallback:** `DEFAULT_NS = 'UnknownFeatureNs'` — used when no namespace is provided.
+- **Layer naming:** `apply-keys` renames each bound layer to `localKey (namespace)` so readers outside the plugin can reconstruct the full key from the canvas. The name is rebuilt from the key every time (never appended to), and renaming throws inside component instances — caught and counted, not silent. See README “Layer naming”.
 - **Key uniqueness:** `generateKeys()` uses a `Set<string>` per scan run; appends `_2`, `_3` on collision.
 - **Font preloading:** always call `ensureFonts(nodes)` before mutating `.characters` to avoid runtime errors.
 - **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page).

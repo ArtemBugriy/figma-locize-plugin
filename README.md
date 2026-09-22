@@ -13,13 +13,53 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 - Remote translation application: switch language and apply translations to all keyed nodes
 - Upload selected base language strings to locize with progress indicator (batched, cached)
 - Optional autotranslate toggle for the base language workflow (only enabled when viewing base language)
-- Original node name preservation and restore function after replacing names with keys
+- Layer names carry the key and namespace (`localKey (namespace)`) so the file is readable without the plugin — see [Layer naming](#layer-naming)
+- Original node name preservation: the pre-plugin layer name is stored on the node and restored when the key is cleared
 - Select-all / bulk selection management with table row cap (100) and overflow indicator
 - Safe network scope (only calls https://api.locize.app)
 - Local clientStorage persistence for credentials, base language, version, and selection states
 - Font preloading before mutating characters prevents missing font errors
 - Simple flat-map handling of nested JSON translation structures
 - Caching of fetched namespaces per language to minimize API calls
+
+---
+
+## Layer naming
+
+When you press **Apply keys to nodes**, every keyed TEXT layer is renamed to:
+
+```
+<localKey> (<namespace>)
+```
+
+for example the key `Common.submit_button` produces the layer name `submit_button (Common)`.
+
+The point is that the full key lives **on the canvas**, not only in the plugin's private
+data: anyone reading the Figma file — a developer, a REST API consumer, another plugin —
+can reconstruct `namespace.localKey` from the layer name alone.
+
+**How to parse a layer name back into a key**
+
+- Take the **last** parenthesised group as the namespace, and everything before it
+  (trimmed) as the local key. The local key may itself contain parentheses:
+  `Submit (draft) (Common)` → namespace `Common`, local key `Submit (draft)`.
+- Dots inside the local key are preserved: the key is split on its **first** dot only, so
+  `Common.forms.submit` becomes `forms.submit (Common)` and joins back the same way.
+- A key with no namespace (possible if the namespace field is cleared in the table) gets
+  no suffix — the layer name is just the key.
+
+**Invariant:** a layer bound to a locize key always carries its namespace in the name.
+There is deliberately no "restore original names" action for bound layers; **Clear keys**
+unbinds a node *and* puts its original name back, in one step.
+
+**Legacy layers.** Older versions of the plugin renamed layers to the dotted
+`namespace.localKey` string (or left the name untouched). Those layers keep their old name
+until keys are applied to them again — to migrate a file, press **Get assigned**, select
+all, then **Apply keys to nodes**.
+
+Layer names inside component instances are read-only in Figma, so the rename is skipped
+there; the plugin reports how many layers it could not rename instead of claiming success.
+The key itself is still written — only the name can't follow.
 
 ---
 
