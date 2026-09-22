@@ -28,7 +28,7 @@ Key message types (defined in `code.ts` switch and `ui.html` handler):
 
 ## Key Data Structures (code.ts)
 ```ts
-interface Settings { projectId, apiKey, version, baseLanguage }
+interface Settings { projectId, apiKey, version, baseLanguage, apiBaseUrl }
 interface ScanItem  { nodeId, name, originalName, text, key, namespace, localKey, existing, selected? }
 type TranslationMap = { [fullKey: string]: string }
 ```
@@ -40,7 +40,7 @@ type TranslationMap = { [fullKey: string]: string }
 - `locize:origName` — original Figma layer name (before it gets renamed to the key)
 
 ## clientStorage Keys (code.ts)
-`locize.projectId`, `locize.apiKey`, `locize.version`, `locize.baseLanguage`, `locize:selected`
+`locize.projectId`, `locize.apiKey`, `locize.version`, `locize.baseLanguage`, `locize.apiBaseUrl`, `locize:selected`
 
 Selection state stores **only unchecked** node IDs (`false`); all others are implicitly checked (compact storage).
 
@@ -80,10 +80,11 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 - **Font preloading:** always call `ensureFonts(nodes)` before mutating `.characters` to avoid runtime errors.
 - **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page).
 - **Table row cap:** UI renders max `MAX_TABLE_ROWS = 100` rows; overflow shown as `+N items`.
-- **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `["https://api.locize.app"]`.
+- **API base URL:** per-project setting (`apiBaseUrl`), defaulting to `https://api.locize.app`; the lite tier is `https://api.lite.locize.app`. `ui.html` builds every request from it — never hardcode the host.
+- **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `https://api.locize.app` and `https://*.locize.app`. A base URL outside that wildcard is blocked by Figma, so the UI warns before saving.
 
 ## External API
-All calls go to `https://api.locize.app`. Relevant endpoints (called from `ui.html`):
+All calls go to the active project's `apiBaseUrl` (default `https://api.locize.app`). Relevant endpoints (called from `ui.html`):
 - `GET  /languages/{projectId}` — list available languages
 - `GET  /{projectId}/{version}/{language}/{namespace}` — fetch translation flat-map
 - `POST /update/{projectId}/{version}/{language}/{namespace}` — upload source strings

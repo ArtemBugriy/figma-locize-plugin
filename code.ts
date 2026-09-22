@@ -5,6 +5,8 @@ interface Settings {
   apiKey: string;
   version: string;
   baseLanguage: string;
+  /** Host serving the locize API, e.g. the lite tier's https://api.lite.locize.app. */
+  apiBaseUrl: string;
 }
 
 interface Project extends Settings {
@@ -38,6 +40,7 @@ const PROJECTS_STORAGE_KEY = 'locize:projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'locize:activeProjectId';
 const DEFAULT_NS = 'UnknownFeatureNs';
 const MAX_SCAN_NODES = 250;
+const DEFAULT_API_BASE = 'https://api.locize.app';
 
 // --- Storage helpers ---
 
@@ -47,11 +50,12 @@ async function loadProjects(): Promise<{ projects: Project[]; activeProjectId: s
   let projects: Project[] = Array.isArray(raw) ? raw as Project[] : [];
   if (!projects.length) {
     // Migrate from the legacy single-project keys, if present.
-    const [projectId, apiKey, version, baseLanguage] = await Promise.all([
+    const [projectId, apiKey, version, baseLanguage, apiBaseUrl] = await Promise.all([
       figma.clientStorage.getAsync('locize.projectId'),
       figma.clientStorage.getAsync('locize.apiKey'),
       figma.clientStorage.getAsync('locize.version'),
       figma.clientStorage.getAsync('locize.baseLanguage'),
+      figma.clientStorage.getAsync('locize.apiBaseUrl'),
     ]);
     if (projectId) {
       projects = [{
@@ -61,9 +65,12 @@ async function loadProjects(): Promise<{ projects: Project[]; activeProjectId: s
         apiKey: String(apiKey || ''),
         version: String(version || 'latest'),
         baseLanguage: String(baseLanguage || 'en'),
+        apiBaseUrl: String(apiBaseUrl || DEFAULT_API_BASE),
       }];
     }
   }
+  // Projects saved before the API base URL was configurable predate the field.
+  projects = projects.map(p => p.apiBaseUrl ? p : { ...p, apiBaseUrl: DEFAULT_API_BASE });
   let activeProjectId = String((await figma.clientStorage.getAsync(ACTIVE_PROJECT_STORAGE_KEY)) || '');
   if (!projects.some(p => p.id === activeProjectId)) activeProjectId = projects[0] ? projects[0].id : '';
   return { projects, activeProjectId };
@@ -78,6 +85,7 @@ async function mirrorActiveToLegacy(projects: Project[], activeProjectId: string
     figma.clientStorage.setAsync('locize.apiKey', p.apiKey),
     figma.clientStorage.setAsync('locize.version', p.version),
     figma.clientStorage.setAsync('locize.baseLanguage', p.baseLanguage),
+    figma.clientStorage.setAsync('locize.apiBaseUrl', p.apiBaseUrl || DEFAULT_API_BASE),
   ]);
 }
 

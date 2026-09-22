@@ -16,11 +16,29 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 - Layer names carry the key and namespace (`localKey (namespace)`) so the file is readable without the plugin — see [Layer naming](#layer-naming)
 - Original node name preservation: the pre-plugin layer name is stored on the node and restored when the key is cleared
 - Select-all / bulk selection management with table row cap (100) and overflow indicator
-- Safe network scope (only calls https://api.locize.app)
+- Per-project API base URL: point a project at the lite tier (`https://api.lite.locize.app`) or any other locize host — see [API base URL](#api-base-url)
+- Safe network scope (only calls locize hosts)
 - Local clientStorage persistence for credentials, base language, version, and selection states
 - Font preloading before mutating characters prevents missing font errors
 - Simple flat-map handling of nested JSON translation structures
 - Caching of fetched namespaces per language to minimize API calls
+
+---
+
+## API base URL
+
+Each project in **Settings** has its own **API base URL**. Leave it empty for the default
+`https://api.locize.app`; projects on the lite tier use `https://api.lite.locize.app`.
+
+Every request — languages, translations, uploads, sync status — is built from this value,
+and it is part of the namespace cache key, so two projects on different hosts never share
+cached data. Trailing slashes are stripped for you.
+
+**Constraint:** Figma only lets the plugin reach hosts whitelisted in `manifest.json`
+(`networkAccess.allowedDomains`), currently `https://*.locize.app`. A base URL on any other
+domain is blocked by Figma with no useful error, so the plugin warns when you save such a
+project and refuses to upload with it. To use a host outside `*.locize.app`, add it to
+`manifest.json` and reload the plugin.
 
 ---
 

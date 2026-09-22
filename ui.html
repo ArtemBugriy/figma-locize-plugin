@@ -394,6 +394,29 @@ const SUGGESTIONS_MAX = 5;
 // Max rows in table
 const MAX_TABLE_ROWS = 100;
 const DEFAULT_NS = 'UnknownFeatureNs';
+// locize's standard host. Some projects live elsewhere (e.g. the lite tier at
+// https://api.lite.locize.app), so it's a per-project setting.
+const DEFAULT_API_BASE = 'https://api.locize.app';
+
+// Trailing slashes are stripped so every call site can just append "/path".
+function normalizeApiBase(value){
+  const v = String(value || '').trim().replace(/\/+$/, '');
+  return v || DEFAULT_API_BASE;
+}
+
+// Figma only lets the iframe reach hosts listed in manifest.json
+// (networkAccess.allowedDomains, currently *.locize.app). A host outside that list
+// is blocked before the request leaves, with no useful error -- so say so upfront.
+function apiBaseProblem(url){
+  let parsed;
+  try { parsed = new URL(url); } catch(_){ return `Invalid API base URL: ${url}`; }
+  if(parsed.protocol !== 'https:') return `API base URL must use https: ${url}`;
+  // Mirrors the manifest's "https://*.locize.app" wildcard, which needs a subdomain.
+  if(!/\.locize\.app$/.test(parsed.hostname)){
+    return `${parsed.hostname} is not allowed by manifest.json (networkAccess.allowedDomains) - requests to it will be blocked by Figma`;
+  }
+  return '';
+}
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
@@ -794,6 +817,7 @@ function collectSettings(){
     apiKey: (p.apiKey || '').trim(),
     version: (p.version || '').trim() || 'latest',
     baseLanguage: (p.baseLanguage || '').trim() || 'en',
+    apiBaseUrl: normalizeApiBase(p.apiBaseUrl),
   };
 }
 
@@ -808,6 +832,10 @@ function refreshActiveProject(){
 }
 
 function genProjectId(){ return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+// Editing any of these re-targets the project at different remote data, so whatever
+// was fetched under the old values must not be reused.
+const CACHE_INVALIDATING_FIELDS = new Set(['projectId', 'version', 'apiBaseUrl']);
 
 // Render the Settings cards + keep the Key Management dropdown in sync.
 function renderProjectsUI(){
@@ -830,16 +858,18 @@ function renderProjectsUI(){
     });
     card.appendChild(remove);
 
-    const mk = (labelText, key, type, grow) => {
+    const mk = (labelText, key, type, grow, attrs) => {
       const label = document.createElement('label');
       if(grow) label.className = 'grow';
       label.textContent = labelText;
       const input = document.createElement('input');
       input.type = type || 'text';
       input.value = p[key] || '';
+      if(attrs) Object.keys(attrs).forEach(a => { input[a] = attrs[a]; });
       input.addEventListener('input', () => {
         p[key] = input.value;
         if(key === 'name') renderProjectSelect();
+        if(CACHE_INVALIDATING_FIELDS.has(key)) clearRemoteCache();
       });
       label.appendChild(input);
       return label;
@@ -858,6 +888,14 @@ function renderProjectsUI(){
     row2.appendChild(mk('Base Lang', 'baseLanguage'));
     card.appendChild(row2);
 
+    const row3 = document.createElement('div');
+    row3.className = 'project-row';
+    row3.appendChild(mk('API base URL', 'apiBaseUrl', 'text', true, {
+      placeholder: DEFAULT_API_BASE,
+      title: `Host serving the locize API for this project. Leave empty for ${DEFAULT_API_BASE}; the lite tier uses https://api.lite.locize.app. Must be a *.locize.app host - other domains are blocked by manifest.json.`,
+    }));
+    card.appendChild(row3);
+
     els.projectsList.appendChild(card);
   });
   if(els.projectsEmpty) els.projectsEmpty.style.display = projects.length ? 'none' : '';
@@ -872,11 +910,19 @@ function renderProjectSelect(){
   ).join('');
   if(activeProjectId) els.projectSelect.value = activeProjectId;
   const active = projects.find(p => p.id === activeProjectId);
-  if(els.activeProjectInfo) els.activeProjectInfo.textContent = active ? ('Project ID: ' + (active.projectId || '—')) : 'No active project';
+  if(els.activeProjectInfo){
+    let info = 'No active project';
+    if(active){
+      info = 'Project ID: ' + (active.projectId || '—');
+      const base = normalizeApiBase(active.apiBaseUrl);
+      if(base !== DEFAULT_API_BASE) info += '  ·  API: ' + base;
+    }
+    els.activeProjectInfo.textContent = info;
+  }
 }
 
 els.addProject.addEventListener('click', () => {
-  const p = { id: genProjectId(), name: '', projectId: '', apiKey: '', version: 'latest', baseLanguage: 'en', lastNamespace: '' };
+  const p = { id: genProjectId(), name: '', projectId: '', apiKey: '', version: 'latest', baseLanguage: 'en', apiBaseUrl: DEFAULT_API_BASE, lastNamespace: '' };
   projects.push(p);
   activeProjectId = p.id;
   renderProjectsUI();
@@ -892,6 +938,10 @@ els.saveProjects.addEventListener('click', () => {
   renderProjectSelect();
   refreshActiveProject();
   setStatus('Projects saved');
+  projects.forEach(pr => {
+    const problem = apiBaseProblem(normalizeApiBase(pr.apiBaseUrl));
+    if(problem) setStatus(`⚠ ${pr.name || pr.projectId || 'Untitled'}: ${problem}`, true);
+  });
 });
 
 els.projectSelect.addEventListener('change', () => {
@@ -1095,11 +1145,11 @@ let nsDropdownEl = null;
 let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '', onPick: null };
 
 function getNsCacheKey(s, lang){
-  return `${s.projectId}|${s.version}|${lang}`;
+  return `${s.apiBaseUrl}|${s.projectId}|${s.version}|${lang}`;
 }
 
 async function fetchNamespacesFromApi(s, lang){
-  const url = `https://api.locize.app/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
+  const url = `${s.apiBaseUrl}/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const data = await res.json();
@@ -1473,6 +1523,8 @@ els.applyTopSuggestions.addEventListener('click', async () => {
 
 function validateSettings(s){
   if(!s.projectId || !s.apiKey){ setStatus('ProjectId and ApiKey are required'); return false; }
+  const problem = apiBaseProblem(s.apiBaseUrl);
+  if(problem){ setStatus(problem); return false; }
   return true;
 }
 
@@ -1483,7 +1535,7 @@ function escapeHtml(str) {
 async function fetchLanguagesList(){
   const s = collectSettings(); if(!s.projectId) return;
   try {
-    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`);
+    const res = await fetch(`${s.apiBaseUrl}/languages/${s.projectId}`);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const langs = Object.keys(data);
@@ -1496,7 +1548,7 @@ async function fetchLanguagesList(){
 
 async function fetchTranslations(s, language, namespace){
   const ns = encodeURIComponent(namespace);
-  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${ns}`;
+  const url = `${s.apiBaseUrl}/${s.projectId}/${s.version}/${language}/${ns}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -1601,7 +1653,7 @@ async function fetchWithAuth(url, options, apiKey){
 async function updateTranslationsBatch(s, language, namespace, body, autotranslate=false){
   const ns = encodeURIComponent(namespace || DEFAULT_NS);
   const q = autotranslate ? '?autotranslate=true' : '';
-  const url = `https://api.locize.app/update/${s.projectId}/${s.version}/${language}/${ns}${q}`;
+  const url = `${s.apiBaseUrl}/update/${s.projectId}/${s.version}/${language}/${ns}${q}`;
   const opts = {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
@@ -1642,7 +1694,7 @@ async function verifyCredentials(s, signal, seq){
   const isCurrent = () => seq === verifySeq;
   if(isCurrent()) setStatus('Verifying credentials...');
   try {
-    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`, { signal });
+    const res = await fetch(`${s.apiBaseUrl}/languages/${s.projectId}`, { signal });
     if(res.status === 404){ if(isCurrent()) setStatus('Project not found (404)', true); return false; }
     if(res.status === 401 || res.status === 403){ if(isCurrent()) setStatus('Unauthorized to access project: '+res.status, true); return false; }
     if(!res.ok){ if(isCurrent()) setStatus('Project check failed: HTTP '+res.status, true); return false; }
