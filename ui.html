@@ -619,6 +619,7 @@ function renderTable(){
     }
   }
   updateButtons();
+  closeDropdownIfAnchorDetached();
 }
 
 function itemStatusText(item) {
@@ -1309,6 +1310,9 @@ function ensureDropdownEl(){
 
 function positionDropdown(anchor){
   if(!anchor) return;
+  // A detached anchor measures as an all-zero rect, which would park the list in the
+  // document's top-left corner. It has no field to point at any more, so close it.
+  if(!anchor.isConnected){ closeNsDropdown(); return; }
   // Create the element if it isn't there yet. openNsDropdown positions before it
   // renders, so on the very first open this used to bail out on a null nsDropdownEl
   // and the dropdown was shown with no left/top -- which, being position:absolute,
@@ -1373,6 +1377,15 @@ function updateNsDropdown(anchor, items){
   nsDropdownState.activeIndex = items.length ? Math.min(nsDropdownState.activeIndex, items.length-1) : -1;
   positionDropdown(anchor);
   renderNsDropdown(items);
+}
+
+// The dropdown is anchored to a live element, but a re-render replaces the row it
+// lives in -- and Chrome does NOT fire blur when a focused node is removed, so the
+// blur-driven close never runs. Call this after anything that rebuilds the table.
+function closeDropdownIfAnchorDetached(){
+  if(nsDropdownState.open && nsDropdownState.anchor && !nsDropdownState.anchor.isConnected){
+    closeNsDropdown();
+  }
 }
 
 function closeNsDropdown(){
