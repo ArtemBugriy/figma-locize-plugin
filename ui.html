@@ -1308,11 +1308,16 @@ function ensureDropdownEl(){
 }
 
 function positionDropdown(anchor){
-  if(!nsDropdownEl || !anchor) return;
+  if(!anchor) return;
+  // Create the element if it isn't there yet. openNsDropdown positions before it
+  // renders, so on the very first open this used to bail out on a null nsDropdownEl
+  // and the dropdown was shown with no left/top -- which, being position:absolute,
+  // drops it at its static position as the last child of <body>, off-screen.
+  const el = ensureDropdownEl();
   const r = anchor.getBoundingClientRect();
-  nsDropdownEl.style.minWidth = r.width + 'px';
-  nsDropdownEl.style.left = Math.round(window.scrollX + r.left) + 'px';
-  nsDropdownEl.style.top = Math.round(window.scrollY + r.bottom + 2) + 'px';
+  el.style.minWidth = r.width + 'px';
+  el.style.left = Math.round(window.scrollX + r.left) + 'px';
+  el.style.top = Math.round(window.scrollY + r.bottom + 2) + 'px';
 }
 
 // An entry is either a plain string (the namespace pickers) or a { label, hint }
