@@ -15,7 +15,7 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 - Layer names carry the key and namespace (`localKey (namespace)`) so the file is readable without the plugin — see [Layer naming](#layer-naming)
 - Original node name preservation: the pre-plugin layer name is stored on the node and restored when the key is cleared
 - Select-all / bulk selection management with table row cap (100) and overflow indicator
-- Per-project API base URL: point a project at the lite tier (`https://api.lite.locize.app`) or any other locize host — see [API base URL](#api-base-url)
+- Per-project API base URL: point a project at locize's Standard CDN (`https://api.lite.locize.app`) or any other locize host — see [API base URL](#api-base-url)
 - Safe network scope (only calls locize hosts)
 - Local clientStorage persistence for credentials, base language, version, and selection states
 - Font preloading before mutating characters prevents missing font errors
@@ -27,11 +27,20 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 ## API base URL
 
 Each project in **Settings** has its own **API base URL**. Leave it empty for the default
-`https://api.locize.app`; projects on the lite tier use `https://api.lite.locize.app`.
+`https://api.locize.app` — locize's **Pro** CDN. Projects on the **Standard** CDN use
+`https://api.lite.locize.app`.
 
 Every request — languages, translations, uploads, sync status — is built from this value,
 and it is part of the namespace cache key, so two projects on different hosts never share
 cached data. Trailing slashes are stripped for you.
+
+**Caching.** Every read is sent with `?cache=no` and `cache: 'no-store'`. A version's
+content changes under a fixed URL, so a cached response misreports sync status — most
+visibly right after an upload, when the plugin re-reads to confirm what it just wrote.
+`?cache=no` is the parameter locize documents for the Standard CDN, whose cache is
+fixed at one hour; the Pro CDN has no bypass parameter and its TTL is configured per
+version in the locize project settings, so if stale reads persist there, lower that
+version's `Cache-Control`. Uploads are not cached and carry neither.
 
 **Constraint:** Figma only lets the plugin reach hosts whitelisted in `manifest.json`
 (`networkAccess.allowedDomains`), currently `https://*.locize.app`. A base URL on any other

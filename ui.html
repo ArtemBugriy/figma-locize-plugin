@@ -399,9 +399,27 @@ const SUGGESTIONS_MAX = 5;
 // Max rows in table
 const MAX_TABLE_ROWS = 100;
 const DEFAULT_NS = 'UnknownFeatureNs';
-// locize's standard host. Some projects live elsewhere (e.g. the lite tier at
-// https://api.lite.locize.app), so it's a per-project setting.
+// locize serves a project from one of two CDNs, on different hosts: Pro at
+// api.locize.app and Standard at api.lite.locize.app. Which one a project uses is a
+// property of that project, hence the per-project setting.
 const DEFAULT_API_BASE = 'https://api.locize.app';
+
+// Reads must not be served from a cache: a version's content changes under the same
+// URL, so a stale hit shows the wrong sync status -- most visibly right after an
+// upload, when the plugin re-reads to confirm what it just wrote.
+//
+// locize's Standard CDN (api.lite.locize.app, BunnyCDN) has a fixed one-hour cache and
+// documents ?cache=no to bypass it; the official i18next-locize-backend appends exactly
+// this, on reads only. The Pro CDN (api.locize.app, CloudFront) documents no bypass --
+// its TTL is a per-version project setting -- but the parameter does no harm there, so
+// every read carries it. Writes are never cached and are left alone.
+function noCacheUrl(url){
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cache=no';
+}
+
+// Pairs with noCacheUrl: the parameter defeats the CDN, this defeats the iframe's own
+// HTTP cache, which would otherwise happily reuse a response for the identical URL.
+const NO_STORE = { cache: 'no-store' };
 
 // Trailing slashes are stripped so every call site can just append "/path".
 function normalizeApiBase(value){
@@ -923,7 +941,7 @@ function renderProjectsUI(){
     row3.className = 'project-row';
     row3.appendChild(mk('API base URL', 'apiBaseUrl', 'text', true, {
       placeholder: DEFAULT_API_BASE,
-      title: `Host serving the locize API for this project. Leave empty for ${DEFAULT_API_BASE}; the lite tier uses https://api.lite.locize.app. Must be a *.locize.app host - other domains are blocked by manifest.json.`,
+      title: `Host serving the locize API for this project. Leave empty for ${DEFAULT_API_BASE} (locize's Pro CDN); projects on the Standard CDN use https://api.lite.locize.app. Must be a *.locize.app host - other domains are blocked by manifest.json.`,
     }));
     card.appendChild(row3);
 
@@ -1236,7 +1254,7 @@ function getNsCacheKey(s, lang){
 
 async function fetchNamespacesFromApi(s, lang){
   const url = `${s.apiBaseUrl}/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
-  const res = await fetch(url);
+  const res = await fetch(noCacheUrl(url), NO_STORE);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const data = await res.json();
   // Expect array of objects with key like project/version/lang/namespace
@@ -1646,7 +1664,7 @@ function escapeHtml(str) {
 async function fetchLanguagesList(){
   const s = collectSettings(); if(!s.projectId) return;
   try {
-    const res = await fetch(`${s.apiBaseUrl}/languages/${s.projectId}`);
+    const res = await fetch(noCacheUrl(`${s.apiBaseUrl}/languages/${s.projectId}`), NO_STORE);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const langs = Object.keys(data);
@@ -1660,7 +1678,7 @@ async function fetchLanguagesList(){
 async function fetchTranslations(s, language, namespace){
   const ns = encodeURIComponent(namespace);
   const url = `${s.apiBaseUrl}/${s.projectId}/${s.version}/${language}/${ns}`;
-  const res = await fetch(url);
+  const res = await fetch(noCacheUrl(url), NO_STORE);
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
@@ -1805,7 +1823,7 @@ async function verifyCredentials(s, signal, seq){
   const isCurrent = () => seq === verifySeq;
   if(isCurrent()) setStatus('Verifying credentials...');
   try {
-    const res = await fetch(`${s.apiBaseUrl}/languages/${s.projectId}`, { signal });
+    const res = await fetch(noCacheUrl(`${s.apiBaseUrl}/languages/${s.projectId}`), { ...NO_STORE, signal });
     if(res.status === 404){ if(isCurrent()) setStatus('Project not found (404)', true); return false; }
     if(res.status === 401 || res.status === 403){ if(isCurrent()) setStatus('Unauthorized to access project: '+res.status, true); return false; }
     if(!res.ok){ if(isCurrent()) setStatus('Project check failed: HTTP '+res.status, true); return false; }
