@@ -1,11 +1,12 @@
 {
   "name": "Figma Locize Plugin",
-  "version": "9.0.0",
+  "version": "10.0.0",
   "description": "Effortlessly bridge your Figma designs with your locize translation project. Scan text layers, assign stable i18n keys, upload source content, fetch translations, and preview localized UI directly in the canvas.",
   "main": "code.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
+    "test": "node --test \"test/**/*.test.js\"",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
     "watch": "npm run build -- --watch"
   },
@@ -17,6 +18,7 @@
     "@typescript-eslint/eslint-plugin": "^6.12.0",
     "@typescript-eslint/parser": "^6.12.0",
     "eslint": "^8.54.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.3.2"
   },
   "eslintConfig": {

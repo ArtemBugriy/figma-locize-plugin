@@ -19,8 +19,8 @@ Figma plugins run in two isolated JS contexts that can only communicate via `pos
 
 Key message types (defined in `code.ts` switch and `ui.html` handler):
 - `load-settings` / `settings-loaded` — load credentials from clientStorage
-- `scan-selection` → `scan-result` — collect TEXT nodes and generate keys
-- `apply-keys` — write `locize:key` plugin data to nodes, rename layers
+- `scan-selection` → `scan-result` — collect TEXT nodes and generate keys. Sent automatically by `requestScan()` in `ui.html`: on `selection-change`, on project switch/load, and when the namespace or a scan option changes. There is no manual scan control
+- `apply-keys` → `keys-applied` — write `locize:key` plugin data to nodes, rename layers to `localKey (namespace)`; the reply carries the names actually written plus a `renameFailed` count
 - `get-assigned` → `assigned-result` — fetch already-keyed nodes
 - `apply-language` — apply a `TranslationMap` to nodes' `.characters`
 - `update-text` — live-edit a single node's text from the table
@@ -28,7 +28,7 @@ Key message types (defined in `code.ts` switch and `ui.html` handler):
 
 ## Key Data Structures (code.ts)
 ```ts
-interface Settings { projectId, apiKey, version, baseLanguage }
+interface Settings { projectId, apiKey, version, baseLanguage, apiBaseUrl }
 interface ScanItem  { nodeId, name, originalName, text, key, namespace, localKey, existing, selected? }
 type TranslationMap = { [fullKey: string]: string }
 ```
@@ -40,7 +40,7 @@ type TranslationMap = { [fullKey: string]: string }
 - `locize:origName` — original Figma layer name (before it gets renamed to the key)
 
 ## clientStorage Keys (code.ts)
-`locize.projectId`, `locize.apiKey`, `locize.version`, `locize.baseLanguage`, `locize:selected`
+`locize.projectId`, `locize.apiKey`, `locize.version`, `locize.baseLanguage`, `locize.apiBaseUrl`, `locize:selected`
 
 Selection state stores **only unchecked** node IDs (`false`); all others are implicitly checked (compact storage).
 
@@ -64,10 +64,23 @@ npm run build        # tsc → compiles code.ts → code.js (the file Figma load
 npm run watch        # tsc --watch (recommended during development)
 npm run lint         # eslint over .ts files
 npm run lint:fix     # auto-fix lint errors
+npm test             # node --test over test/**/*.test.js (jsdom)
 ```
 
 **After any edit to `code.ts` you must recompile** — Figma loads `code.js`, not `code.ts`.  
 `ui.html` is loaded directly; no build step needed for UI changes.
+
+## Tests
+`test/` runs the **real `ui.html`** inside jsdom (`test/helpers/ui.js` boots it and stubs
+the two things it talks to: `parent.postMessage` and `fetch`). Since `ui.html` has no
+build step and cannot be imported, driving it through a DOM is the only way to cover the
+frontend — and every case in there is a bug that shipped, so treat a failure as a
+regression, not a stale expectation.
+
+jsdom has no layout engine: `getBoundingClientRect()` returns zeros and
+`offsetWidth/offsetHeight` are 0. Tests that care about geometry stub them (see
+`dropdown.test.js`). Values returned from `ui.eval()` come from another realm, so
+`deepStrictEqual` on them needs `Array.from` first.
 
 ## Loading the Plugin in Figma
 Figma → Plugins → Development → Import plugin from manifest → select `manifest.json`.  
@@ -75,14 +88,20 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 
 ## Conventions & Patterns
 - **Default namespace fallback:** `DEFAULT_NS = 'UnknownFeatureNs'` — used when no namespace is provided.
+- **Layer naming:** `apply-keys` renames each bound layer to `localKey (namespace)` so readers outside the plugin can reconstruct the full key from the canvas. The name is rebuilt from the key every time (never appended to), and renaming throws inside component instances — caught and counted, not silent. See README “Layer naming”.
 - **Key uniqueness:** `generateKeys()` uses a `Set<string>` per scan run; appends `_2`, `_3` on collision.
 - **Font preloading:** always call `ensureFonts(nodes)` before mutating `.characters` to avoid runtime errors.
-- **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page).
+- **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page) — except `postScanResult()`, which reports `No selection` and empties the table.
+- **Selection-driven table:** the Key Management table is rebuilt from the current selection, so a re-scan discards unapplied row edits. Anything that triggers one goes through `requestScan()`; `lastScannedNamespace` suppresses redundant re-scans.
 - **Table row cap:** UI renders max `MAX_TABLE_ROWS = 100` rows; overflow shown as `+N items`.
-- **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `["https://api.locize.app"]`.
+- **Row-level updates:** a sync-status refresh updates rows in place (`applyStatusToRows` over the `rowRefs` map), never via `renderTable()`. Full renders are for data changes only — scan, apply/clear keys, filter toggles. Nothing on a blur path may call `renderTable()`: the refresh it schedules lands ~400ms later, by which time the user is typing in another row.
+- **Key suggestions:** the Key cell owns them. `showKeySuggestions()` fills the shared dropdown; `suggestForItem()` ranks one row at a time — fuzzy against the node text when nothing is typed, substring containment (`containmentScore`) once the user types, because the fuzzy scorer divides by candidate length and sinks short queries. The pool is warmed by `ensureSuggestionPoolReady()`.
+- **API base URL:** per-project setting (`apiBaseUrl`), defaulting to `https://api.locize.app` (locize's Pro CDN); the Standard CDN is `https://api.lite.locize.app`. `ui.html` builds every request from it — never hardcode the host.
+- **No cached reads:** every GET goes through `noCacheUrl()` (`?cache=no`, what `i18next-locize-backend` sends for the Standard CDN) plus `NO_STORE` (`cache: 'no-store'`, for the iframe's own HTTP cache). A version's content changes under a fixed URL, so a stale read misreports sync status right after an upload. Writes are never cached — don't add it to `POST /update`.
+- **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `https://api.locize.app` and `https://*.locize.app`. A base URL outside that wildcard is blocked by Figma, so the UI warns before saving.
 
 ## External API
-All calls go to `https://api.locize.app`. Relevant endpoints (called from `ui.html`):
+All calls go to the active project's `apiBaseUrl` (default `https://api.locize.app`). Relevant endpoints (called from `ui.html`):
 - `GET  /languages/{projectId}` — list available languages
 - `GET  /{projectId}/{version}/{language}/{namespace}` — fetch translation flat-map
 - `POST /update/{projectId}/{version}/{language}/{namespace}` — upload source strings
@@ -93,4 +112,5 @@ All calls go to `https://api.locize.app`. Relevant endpoints (called from `ui.ht
 | `code.ts` | Plugin backend — node traversal, key generation, clientStorage, message handler |
 | `ui.html` | Plugin frontend — all UI, fetch calls, table rendering, suggestion engine |
 | `manifest.json` | Plugin metadata, network whitelist, editor types |
+| `test/` | jsdom tests driving the real `ui.html`; `npm test` |
 | `tsconfig.json` | Targets ES6; typeRoots includes `@figma/plugin-typings` |

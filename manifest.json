@@ -14,7 +14,8 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "https://api.locize.app"
+      "https://api.locize.app",
+      "https://*.locize.app"
     ]
   }
 }

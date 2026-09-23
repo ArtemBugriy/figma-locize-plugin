@@ -58,7 +58,7 @@
   ::-webkit-scrollbar-track { background: var(--bg); }
 
   html { display: flex; justify-content: center; }
-  body { width: 700px; max-width: 100%; height: max-content; margin: 0; box-sizing: border-box; font: var(--font); padding: 14px 10px 56px; background: var(--bg); color: var(--text); }
+  body { width: 760px; max-width: 100%; height: max-content; margin: 0; box-sizing: border-box; font: var(--font); padding: 14px 10px 56px; background: var(--bg); color: var(--text); }
   h2 { margin: 8px 0 4px; font-size: 14px; }
 
   fieldset { display: block; max-width: 100%; width: 100%; box-sizing: border-box; min-inline-size: 0; border: 1px solid var(--border); padding: 10px 12px 12px; margin: 0 0 10px; border-radius: var(--radius-m); background: var(--bg-raised); }
@@ -151,9 +151,18 @@
     padding: 6px 8px;
     cursor: pointer;
     color: var(--text);
+    overflow: hidden;
+  }
+  .ns-suggest-label,
+  .ns-suggest-hint {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .ns-suggest-hint {
+    margin-top: 1px;
+    color: var(--text-dim);
+    font-size: 11px;
   }
   .ns-suggest-item:hover,
   .ns-suggest-item.active {
@@ -186,11 +195,19 @@
   .overflow-item + .overflow-item { margin-top: 2px; }
 
   /* Project cards (Settings tab) */
-  .project-card { position: relative; border: 1px solid var(--border); border-radius: var(--radius-m); padding: 10px 12px; background: var(--bg); }
+  /* Column gap of 10px separates the rows; it is deliberately larger than the 8px
+     gap inside a row, so a label reads as belonging to the input under it rather
+     than to the row above. The remove button is absolute and stays out of flow. */
+  .project-card { position: relative; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-m); padding: 10px 12px; background: var(--bg); }
   .project-card + .project-card { margin-top: 8px; }
   .project-card .project-remove { position: absolute; top: 6px; right: 6px; min-width: 24px; padding: 2px 6px; line-height: 1; }
   .project-card .project-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
   .project-card label { min-width: 0; }
+
+  /* A disabled control receives no mouse events in Chromium, so its own title never
+     shows -- and these actions are disabled exactly when a user most wants to know
+     what they do. The wrapper is never disabled, so the tooltip stays reachable. */
+  .hint { display: inline-flex; }
 </style>
 </head>
 <body>
@@ -199,7 +216,7 @@
       <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="panel-keys" id="tab-keys">Key Management</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-translate" id="tab-translate">Translation</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-settings" id="tab-settings">Settings</button>
-      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);">v9</span>
+      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);">v10</span>
     </div>
     <div class="tab-panels" id="tabPanels">
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
@@ -214,9 +231,8 @@
           <legend>Key management</legend>
           <div class="flex gap flex-wrap items-end">
             <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
-            <button id="scanSelection" class="button-primary">Scan selection</button>
           </div>
-          <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:24px;">
+          <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:12px;">
             <label class="checkbox">
               <input id="ignoreHidden" type="checkbox" checked />
               <span>Ignore hidden layers</span>
@@ -230,14 +246,13 @@
             <label class="grow">Suggest from namespaces (comma separated)
               <input id="suggestNamespaces" type="text" placeholder="Common, Landing, Auth" />
             </label>
-            <button id="suggestKeys" class="button-primary">Suggest keys</button>
-            <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
           </div>
-          <div class="small my-6px">Keys are generated based on hierarchy and layer/text name.</div>
-          <label class="checkbox" style="margin-bottom:8px;">
+          <div class="small mt-6px text-secondary">Existing keys from these namespaces are offered in the Key field while you edit it.</div>
+          <label class="checkbox" style="margin-top:12px; margin-bottom:8px;">
             <input id="hideUnchecked" type="checkbox" />
             <span>Show only selected rows</span>
           </label>
+          <div class="small text-secondary" style="margin-bottom:6px;">The table follows your Figma selection.</div>
           <div class="table-container">
             <table id="keysTable">
               <thead>
@@ -247,8 +262,6 @@
                 <th><small>✏️</small>&nbsp;Key</th>
                 <th style="min-width: 150px;"><small>✏️</small>&nbsp;Text</th>
                 <th style="min-width: 150px;">Remote Text</th>
-                <th>Suggestions</th>
-                <th style="min-width: 90px;">Orig Node Name</th>
                 <th>Status</th>
               </tr>
               </thead>
@@ -257,18 +270,12 @@
           </div>
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px" style="align-items:center;">
-            <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
-            <button id="clearKeys" disabled title="Remove the assigned locize key from the selected nodes">Clear keys</button>
-            <div class="overflow-menu" id="moreMenu" style="margin-left:auto;">
-              <button type="button" id="moreMenuTrigger" class="overflow-trigger" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
-              <div class="overflow-menu-items" role="menu" aria-label="More actions">
-                <button type="button" id="restoreNames" class="overflow-item" role="menuitem" disabled>Restore original node names</button>
-              </div>
-            </div>
+            <span class="hint" title="Writes each selected row's key onto its Figma layer and renames the layer to: key (namespace). Local only — nothing is sent to locize."><button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button></span>
+            <span class="hint" title="Unbinds the selected layers: removes their locize key and restores the original layer name. Nothing is deleted in locize."><button id="clearKeys" disabled>Clear keys</button></span>
           </div>
           <div class="flex gap flex-wrap mt-6px">
-            <button id="uploadKeys" class="button-primary" disabled>Upload to locize</button>
-            <label class="checkbox" title="Available only for base language">
+            <span class="hint" title="Sends the selected rows' text to locize as source strings, for the language picked on the Translation tab (base language by default). Only new or changed values are sent, each flagged as needing review."><button id="uploadKeys" class="button-primary" disabled>Upload to locize</button></span>
+            <label class="checkbox" title="Asks locize to machine-translate the uploaded strings into your other languages. Available only when uploading the base language.">
               <input id="autotranslate" type="checkbox" />
               <span>Autotranslate</span>
             </label>
@@ -340,7 +347,6 @@ const els = {
   saveProjects: document.getElementById('saveProjects'),
   projectSelect: document.getElementById('projectSelect'),
   activeProjectInfo: document.getElementById('activeProjectInfo'),
-  scanSelection: document.getElementById('scanSelection'),
   applyKeys: document.getElementById('applyKeys'),
   clearKeys: document.getElementById('clearKeys'),
   uploadKeys: document.getElementById('uploadKeys'),
@@ -350,15 +356,12 @@ const els = {
   languageSelect: document.getElementById('languageSelect'),
   updateTranslations: document.getElementById('updateTranslations'),
   uploadProgress: document.querySelector('#uploadProgress span'),
-  restoreNames: document.getElementById('restoreNames'),
   nsListInfo: document.getElementById('nsListInfo'),
   hideUnchecked: document.getElementById('hideUnchecked'),
   ignoreHidden: document.getElementById('ignoreHidden'),
   mergeSameName: document.getElementById('mergeSameName'),
   autotranslate: document.getElementById('autotranslate'),
   suggestNamespaces: document.getElementById('suggestNamespaces'),
-  suggestKeys: document.getElementById('suggestKeys'),
-  applyTopSuggestions: document.getElementById('applyTopSuggestions'),
   tabPanels: document.getElementById('tabPanels'),
   tabButtons: Array.from(document.querySelectorAll('.tab-btn')), // new
   extraItemsInfo: document.getElementById('extraItemsInfo'), // new
@@ -374,8 +377,10 @@ let activeProjectId = '';
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
-let lastMode = null;
 let activeTab = 'keys';
+// Namespace the current table was built with; guards against re-scanning (and so
+// discarding unapplied row edits) when the field is merely focused and left alone.
+let lastScannedNamespace = null;
 
 // Track verification sequence and allow cancellation
 let verifyController = null; // AbortController | null
@@ -401,6 +406,61 @@ const SUGGESTIONS_MAX = 5;
 // Max rows in table
 const MAX_TABLE_ROWS = 100;
 const DEFAULT_NS = 'UnknownFeatureNs';
+// locize serves a project from one of two CDNs, on different hosts: Pro at
+// api.locize.app and Standard at api.lite.locize.app. Which one a project uses is a
+// property of that project, hence the per-project setting.
+const DEFAULT_API_BASE = 'https://api.locize.app';
+
+// Offered as suggestions on the API base URL field. The field stays free text -- a
+// project could sit behind some other locize host -- so this is a shortcut, not a
+// closed list; apiBaseProblem() still vets whatever ends up there.
+const LOCIZE_API_HOSTS = [
+  { label: DEFAULT_API_BASE, hint: 'Pro CDN \u00b7 default' },
+  { label: 'https://api.lite.locize.app', hint: 'Standard CDN' },
+];
+
+function filterApiHosts(query){
+  const q = String(query || '').trim().toLowerCase();
+  if(!q) return LOCIZE_API_HOSTS;
+  return LOCIZE_API_HOSTS.filter(h => h.label.toLowerCase().includes(q) || h.hint.toLowerCase().includes(q));
+}
+
+// Reads must not be served from a cache: a version's content changes under the same
+// URL, so a stale hit shows the wrong sync status -- most visibly right after an
+// upload, when the plugin re-reads to confirm what it just wrote.
+//
+// locize's Standard CDN (api.lite.locize.app, BunnyCDN) has a fixed one-hour cache and
+// documents ?cache=no to bypass it; the official i18next-locize-backend appends exactly
+// this, on reads only. The Pro CDN (api.locize.app, CloudFront) documents no bypass --
+// its TTL is a per-version project setting -- but the parameter does no harm there, so
+// every read carries it. Writes are never cached and are left alone.
+function noCacheUrl(url){
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cache=no';
+}
+
+// Pairs with noCacheUrl: the parameter defeats the CDN, this defeats the iframe's own
+// HTTP cache, which would otherwise happily reuse a response for the identical URL.
+const NO_STORE = { cache: 'no-store' };
+
+// Trailing slashes are stripped so every call site can just append "/path".
+function normalizeApiBase(value){
+  const v = String(value || '').trim().replace(/\/+$/, '');
+  return v || DEFAULT_API_BASE;
+}
+
+// Figma only lets the iframe reach hosts listed in manifest.json
+// (networkAccess.allowedDomains, currently *.locize.app). A host outside that list
+// is blocked before the request leaves, with no useful error -- so say so upfront.
+function apiBaseProblem(url){
+  let parsed;
+  try { parsed = new URL(url); } catch(_){ return `Invalid API base URL: ${url}`; }
+  if(parsed.protocol !== 'https:') return `API base URL must use https: ${url}`;
+  // Mirrors the manifest's "https://*.locize.app" wildcard, which needs a subdomain.
+  if(!/\.locize\.app$/.test(parsed.hostname)){
+    return `${parsed.hostname} is not allowed by manifest.json (networkAccess.allowedDomains) - requests to it will be blocked by Figma`;
+  }
+  return '';
+}
 
 function pm(message){ parent.postMessage({ pluginMessage: message }, '*'); }
 function setStatus(msg, append=false){ if(!append) els.status.textContent=''; els.status.textContent += msg + '\n'; }
@@ -414,12 +474,22 @@ function updateAutotranslateAvailability(){
     els.autotranslate.disabled = !isBase;
     const label = els.autotranslate.closest('label');
     if(label) label.style.opacity = isBase ? '' : '0.6';
-    els.autotranslate.title = isBase ? '' : 'Works only for base language';
+    // No title on the input means the browser falls back to the label's, which explains
+    // what the option does. title="" would suppress that, so remove the attribute
+    // instead and only set one to say why the option is unavailable right now.
+    if(isBase) els.autotranslate.removeAttribute('title');
+    else els.autotranslate.title = 'Unavailable: you are viewing ' + lang + ', not the base language (' + (s.baseLanguage || 'en') + ').';
   }
 }
 
+// nodeId -> the row parts a sync-status refresh may touch. Rebuilt by every full
+// render; rows that aren't in the DOM (filtered out, or past MAX_TABLE_ROWS) are
+// simply absent, and updates for them are skipped.
+const rowRefs = new Map();
+
 function renderTable(){
   els.tableBody.innerHTML = '';
+  rowRefs.clear();
   const itemsToRender = hideUnchecked ? currentItems.filter(i => i.selected !== false) : currentItems;
   const limitedItems = itemsToRender.slice(0, MAX_TABLE_ROWS);
   const extraCount = Math.max(0, itemsToRender.length - limitedItems.length);
@@ -455,7 +525,6 @@ function renderTable(){
       item.namespace = val;
       recomputeKey(item);
       scheduleStatusRefresh();
-      scheduleSuggestionsRefresh();
     };
     nsInput.addEventListener('blur', commitNs);
     nsInput.addEventListener('keydown', (e) => {
@@ -469,20 +538,55 @@ function renderTable(){
     keyInput.type = 'text';
     keyInput.value = item.localKey || '';
     keyInput.className = 'key-input';
-    // Store initial value on focus
-    keyInput.addEventListener('focus', () => { keyInput.dataset.prev = item.localKey || ''; });
-    // Update the model locally only
-    keyInput.addEventListener('input', () => { item.localKey = keyInput.value; /* no recompute/render here */ });
     const commitKey = () => {
       const val = (keyInput.value || '').trim();
       keyInput.value = val;
       item.localKey = val;
       recomputeKey(item);
       scheduleStatusRefresh();
-      scheduleSuggestionsRefresh();
     };
-    keyInput.addEventListener('blur', commitKey);
+    // A suggestion carries a namespace as well as a key, so both cells are written in
+    // place instead of re-rendering the table, which would drop focus and any edits
+    // pending in other rows.
+    const pickSuggestion = (entry) => {
+      item.namespace = entry.namespace;
+      item.localKey = entry.key;
+      recomputeKey(item);
+      nsInput.value = entry.namespace;
+      keyInput.value = entry.key;
+      keyInput.dataset.prev = entry.key;
+      item.selected = item.selected !== false;
+      closeNsDropdown();
+      scheduleStatusRefresh();
+    };
+    let keySuggestTimer = null;
+    keyInput.addEventListener('focus', () => {
+      keyInput.dataset.prev = item.localKey || '';
+      // Nothing typed yet, so the ranking falls back to the node's own text — which is
+      // the reason to open this list at all.
+      showKeySuggestions(keyInput, item, '', pickSuggestion).catch(() => {});
+    });
+    keyInput.addEventListener('input', () => {
+      item.localKey = keyInput.value; // model only; no recompute/render while typing
+      clearTimeout(keySuggestTimer);
+      keySuggestTimer = setTimeout(() => showKeySuggestions(keyInput, item, keyInput.value, pickSuggestion).catch(() => {}), 120);
+    });
+    keyInput.addEventListener('blur', () => {
+      clearTimeout(keySuggestTimer);
+      setTimeout(() => closeDropdownFor(keyInput), 120);
+      commitKey();
+    });
     keyInput.addEventListener('keydown', (e) => {
+      if(nsDropdownState.open && nsDropdownState.anchor === keyInput){
+        if(e.key === 'ArrowDown'){ e.preventDefault(); moveActive(1); return; }
+        if(e.key === 'ArrowUp'){ e.preventDefault(); moveActive(-1); return; }
+        if(e.key === 'Enter' && nsDropdownState.activeIndex >= 0){
+          const entry = nsDropdownState.items[nsDropdownState.activeIndex];
+          if(entry){ e.preventDefault(); pickSuggestion(entry); return; }
+        }
+        // First Escape only dismisses the list; a second one reverts the field.
+        if(e.key === 'Escape'){ e.preventDefault(); clearTimeout(keySuggestTimer); closeNsDropdown(); return; }
+      }
       if(e.key === 'Enter'){ e.preventDefault(); keyInput.blur(); }
       if(e.key === 'Escape'){ e.preventDefault(); keyInput.value = keyInput.dataset.prev || ''; keyInput.blur(); }
     });
@@ -511,7 +615,6 @@ function renderTable(){
       item.text = val;
       pm({ type: 'update-text', nodeId: item.nodeId, text: val });
       scheduleStatusRefresh();
-      scheduleSuggestionsRefresh();
     });
     // Paste as plain text only
     textDiv.addEventListener('paste', (e) => {
@@ -538,44 +641,11 @@ function renderTable(){
     const tdRemote = document.createElement('td');
     tdRemote.textContent = item.remoteText ?? '';
 
-    const tdSugg = document.createElement('td');
-    if(Array.isArray(item.suggestions) && item.suggestions.length){
-      const select = document.createElement('select');
-      item.suggestions.forEach((sug, idx) => {
-        const opt = document.createElement('option');
-        opt.value = `${sug.namespace}.${sug.key}`;
-        // Show value preview to make selection easier
-        const preview = (sug.value || '').replace(/\s+/g,' ').slice(0,60);
-        opt.textContent = `${sug.namespace}.${sug.key}${preview ? ' — '+preview : ''}`;
-        if(idx===0) opt.selected = true;
-        select.appendChild(opt);
-      });
-      const applyBtn = document.createElement('button');
-      applyBtn.textContent = 'Apply';
-      applyBtn.addEventListener('click', () => {
-        const val = select.value;
-        const dot = val.indexOf('.');
-        const ns = dot>-1 ? val.slice(0,dot) : '';
-        const lk = dot>-1 ? val.slice(dot+1) : val;
-        item.namespace = ns; item.localKey = lk; recomputeKey(item);
-        // keep selected on, do not auto-apply to nodes
-        item.selected = item.selected !== false;
-        renderTable();
-        scheduleStatusRefresh();
-      });
-      tdSugg.appendChild(select);
-      tdSugg.appendChild(applyBtn);
-    } else {
-      tdSugg.textContent = '—';
-    }
-
-    const tdOrig = document.createElement('td');
-    tdOrig.textContent = item.originalName || '';
-
     const tdStatus = document.createElement('td');
     tdStatus.textContent = statusText;
 
-    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdSugg); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
+    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdStatus);
+    rowRefs.set(item.nodeId, { tr, tdRemote, tdStatus });
     els.tableBody.appendChild(tr);
   });
   // simplified: toggle paragraph under the table instead of adding a tbody row
@@ -589,6 +659,7 @@ function renderTable(){
     }
   }
   updateButtons();
+  closeDropdownIfAnchorDetached();
 }
 
 function itemStatusText(item) {
@@ -596,6 +667,22 @@ function itemStatusText(item) {
   if (item.synced === true) return 'synced';
   if (item.synced === false) return 'unsynced';
   return '—';
+}
+
+// A sync-status refresh only ever changes the row's colour, its Remote Text and its
+// Status cell. Re-rendering the whole table for that would rebuild every input, which
+// steals focus and discards whatever is being typed in another row -- and the refresh
+// lands hundreds of milliseconds after the blur that triggered it, so the row being
+// destroyed is rarely the one that was edited.
+function applyStatusToRows(items){
+  for(const item of items){
+    const refs = rowRefs.get(item.nodeId);
+    if(!refs) continue;
+    const statusText = itemStatusText(item);
+    refs.tr.className = statusText === '—' ? '' : statusText;
+    refs.tdRemote.textContent = item.remoteText ?? '';
+    refs.tdStatus.textContent = statusText;
+  }
 }
 
 // Read-only table for the Translation tab: only keyed nodes in the current selection.
@@ -673,8 +760,6 @@ function updateButtons(){
   els.applyKeys.disabled = !anySelected;
   els.clearKeys.disabled = !anyBoundSelected;
   els.uploadKeys.disabled = !anySelected;
-  els.restoreNames.disabled = !currentItems.length;
-  els.applyTopSuggestions.disabled = !currentItems.length;
 }
 
 // Flatten nested dict to flat map of key -> value
@@ -707,9 +792,10 @@ function scheduleStatusRefresh(){
 async function refreshSyncStatus(){
   // Key Management: status reflects whether the key exists in the project (base/source
   // language) — a key with no full namespace+name match is "new" (missing/red).
-  return refreshSyncStatusFor(currentItems, renderTable, collectSettings().baseLanguage);
+  return refreshSyncStatusFor(currentItems, applyStatusToRows, collectSettings().baseLanguage);
 }
 
+// renderFn is called with the items whose status was just recomputed.
 async function refreshSyncStatusFor(items, renderFn, compareLang){
   const seq = ++syncStatusSeq;
   const s = collectSettings();
@@ -717,7 +803,7 @@ async function refreshSyncStatusFor(items, renderFn, compareLang){
   const baseLang = s.baseLanguage || 'en';
   const lang = compareLang || currentLanguage || baseLang;
   const nsSet = Array.from(new Set(items.map(i => (i.namespace||'').trim()).filter(Boolean)));
-  if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(); return; }
+  if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(items); return; }
   try {
     // Ensure cache for required namespaces for the compared and base languages
     if(!remoteCache[lang]) remoteCache[lang] = {};
@@ -788,7 +874,7 @@ async function refreshSyncStatusFor(items, renderFn, compareLang){
     items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; });
   }
   pruneRemoteCache();
-  renderFn();
+  renderFn(items);
 }
 
 // Settings load
@@ -802,6 +888,7 @@ function collectSettings(){
     apiKey: (p.apiKey || '').trim(),
     version: (p.version || '').trim() || 'latest',
     baseLanguage: (p.baseLanguage || '').trim() || 'en',
+    apiBaseUrl: normalizeApiBase(p.apiBaseUrl),
   };
 }
 
@@ -816,6 +903,10 @@ function refreshActiveProject(){
 }
 
 function genProjectId(){ return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+// Editing any of these re-targets the project at different remote data, so whatever
+// was fetched under the old values must not be reused.
+const CACHE_INVALIDATING_FIELDS = new Set(['projectId', 'version', 'apiBaseUrl']);
 
 // Render the Settings cards + keep the Key Management dropdown in sync.
 function renderProjectsUI(){
@@ -838,16 +929,18 @@ function renderProjectsUI(){
     });
     card.appendChild(remove);
 
-    const mk = (labelText, key, type, grow) => {
+    const mk = (labelText, key, type, grow, attrs) => {
       const label = document.createElement('label');
       if(grow) label.className = 'grow';
       label.textContent = labelText;
       const input = document.createElement('input');
       input.type = type || 'text';
       input.value = p[key] || '';
+      if(attrs) Object.keys(attrs).forEach(a => { input[a] = attrs[a]; });
       input.addEventListener('input', () => {
         p[key] = input.value;
         if(key === 'name') renderProjectSelect();
+        if(CACHE_INVALIDATING_FIELDS.has(key)) clearRemoteCache();
       });
       label.appendChild(input);
       return label;
@@ -866,6 +959,36 @@ function renderProjectsUI(){
     row2.appendChild(mk('Base Lang', 'baseLanguage'));
     card.appendChild(row2);
 
+    const row3 = document.createElement('div');
+    row3.className = 'project-row';
+    const baseUrlLabel = mk('API base URL', 'apiBaseUrl', 'text', true, {
+      placeholder: DEFAULT_API_BASE,
+      title: `Host serving the locize API for this project. Leave empty for ${DEFAULT_API_BASE} (locize's Pro CDN); projects on the Standard CDN use https://api.lite.locize.app. Must be a *.locize.app host - other domains are blocked by manifest.json.`,
+    });
+    // Autocomplete of the known CDN hosts, on the shared dropdown.
+    const baseUrlInput = baseUrlLabel.querySelector('input');
+    const showApiHosts = (query) => {
+      const items = filterApiHosts(query);
+      if(items.length) openNsDropdown(baseUrlInput, items, pickApiHost, 'No known hosts');
+      else closeNsDropdown();
+    };
+    function pickApiHost(entry){
+      baseUrlInput.value = entry.label;
+      // Setting .value fires no input event, so mirror what that handler would do.
+      p.apiBaseUrl = entry.label;
+      clearRemoteCache();
+      closeNsDropdown();
+      renderProjectSelect();
+    }
+    // On focus show both hosts: the field usually already holds one of them, and the
+    // point of opening the list is to see the alternative. Typing then filters.
+    baseUrlInput.addEventListener('focus', () => showApiHosts(''));
+    baseUrlInput.addEventListener('input', () => showApiHosts(baseUrlInput.value));
+    baseUrlInput.addEventListener('keydown', onSuggestInputKeydown);
+    baseUrlInput.addEventListener('blur', () => setTimeout(() => closeDropdownFor(baseUrlInput), 120));
+    row3.appendChild(baseUrlLabel);
+    card.appendChild(row3);
+
     els.projectsList.appendChild(card);
   });
   if(els.projectsEmpty) els.projectsEmpty.style.display = projects.length ? 'none' : '';
@@ -880,11 +1003,19 @@ function renderProjectSelect(){
   ).join('');
   if(activeProjectId) els.projectSelect.value = activeProjectId;
   const active = projects.find(p => p.id === activeProjectId);
-  if(els.activeProjectInfo) els.activeProjectInfo.textContent = active ? ('Project ID: ' + (active.projectId || '—')) : 'No active project';
+  if(els.activeProjectInfo){
+    let info = 'No active project';
+    if(active){
+      info = 'Project ID: ' + (active.projectId || '—');
+      const base = normalizeApiBase(active.apiBaseUrl);
+      if(base !== DEFAULT_API_BASE) info += '  ·  API: ' + base;
+    }
+    els.activeProjectInfo.textContent = info;
+  }
 }
 
 els.addProject.addEventListener('click', () => {
-  const p = { id: genProjectId(), name: '', projectId: '', apiKey: '', version: 'latest', baseLanguage: 'en', lastNamespace: '' };
+  const p = { id: genProjectId(), name: '', projectId: '', apiKey: '', version: 'latest', baseLanguage: 'en', apiBaseUrl: DEFAULT_API_BASE, lastNamespace: '' };
   projects.push(p);
   activeProjectId = p.id;
   renderProjectsUI();
@@ -900,6 +1031,10 @@ els.saveProjects.addEventListener('click', () => {
   renderProjectSelect();
   refreshActiveProject();
   setStatus('Projects saved');
+  projects.forEach(pr => {
+    const problem = apiBaseProblem(normalizeApiBase(pr.apiBaseUrl));
+    if(problem) setStatus(`⚠ ${pr.name || pr.projectId || 'Untitled'}: ${problem}`, true);
+  });
 });
 
 els.projectSelect.addEventListener('change', () => {
@@ -911,13 +1046,17 @@ els.projectSelect.addEventListener('change', () => {
   refreshActiveProject();
 });
 
-els.scanSelection.addEventListener('click', () => {
-  lastMode = 'scan';
-  reflectMode();
-  const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
+// The Key Management table always mirrors the current Figma selection — there is no
+// explicit "scan" step. Everything that changes what a scan would return calls this:
+// the selection itself, the namespace for new keys, and the two scan options.
+function requestScan(){
+  const ns = (els.scanNamespace.value || '').trim() || DEFAULT_NS;
+  lastScannedNamespace = ns;
   pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
-  persistScanNamespace();
-});
+}
+
+els.ignoreHidden.addEventListener('change', requestScan);
+els.mergeSameName.addEventListener('change', requestScan);
 
 els.hideUnchecked.addEventListener('change', () => {
   hideUnchecked = els.hideUnchecked.checked;
@@ -1048,51 +1187,102 @@ function combinedScore(valueQueryNorm, valueQTokens, valueQSet, keyQueryNorm, ke
   return Math.max(sVal, sKey * 0.95);
 }
 
-// Top-K selection: keeps only `cap` best candidates in a fixed-size array instead of
-// collecting all matches and sorting a potentially huge intermediate list.
-function suggestForItems(language, namespaces, limit=5, threshold=0.3){
-  const pool = suggestionPool[language] || [];
-  const cap = Math.min(SUGGESTIONS_MAX, Number.isFinite(limit) ? limit : SUGGESTIONS_MAX);
-  for(const item of currentItems){
-    const valueQuery = normalizeVal(item.text);
-    const keyQuery = normalizeKey(item.localKey || '');
-    if(!valueQuery && !keyQuery){ item.suggestions = []; continue; }
-    // Pre-compute tokens once per item, not once per candidate
-    const valueQTokens = valueQuery.split(' ');
-    const valueQSet = new Set(valueQTokens);
-    const keyQTokens = keyQuery.split(' ');
-    const keyQSet = new Set(keyQTokens);
-    const topK = [];
-    for(const cand of pool){
-      const s = combinedScore(valueQuery, valueQTokens, valueQSet, keyQuery, keyQTokens, keyQSet, cand);
-      if(s < threshold) continue;
-      if(topK.length < cap){
-        topK.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s });
-      } else {
-        let worstIdx = 0;
-        for(let j=1;j<cap;j++) if(topK[j].score < topK[worstIdx].score) worstIdx = j;
-        if(s > topK[worstIdx].score) topK[worstIdx] = { namespace: cand.namespace, key: cand.key, value: cand.value, score: s };
-      }
-    }
-    topK.sort((a,b)=> b.score - a.score);
-    item.suggestions = topK;
-  }
-}
-
-let suggestionsRefreshTimer = null;
-function scheduleSuggestionsRefresh(){
-  clearTimeout(suggestionsRefreshTimer);
-  suggestionsRefreshTimer = setTimeout(() => { updateSuggestionsForCurrent(); }, 250);
-}
-
-async function updateSuggestionsForCurrent(){
+// Language the suggestion pool is built for: whatever is being viewed, else the base.
+function suggestionLanguage(){
   const s = collectSettings();
-  const lang = els.languageSelect.value || s.baseLanguage || 'en';
+  return els.languageSelect.value || s.baseLanguage || 'en';
+}
+
+// Keeps only the SUGGESTIONS_MAX best candidates in a fixed-size array instead of
+// collecting every match and sorting a potentially huge intermediate list.
+function topMatches(pool, scoreOf, threshold){
+  const cap = SUGGESTIONS_MAX;
+  const topK = [];
+  for(const cand of pool){
+    const s = scoreOf(cand);
+    if(s < threshold) continue;
+    if(topK.length < cap){
+      topK.push({ namespace: cand.namespace, key: cand.key, value: cand.value, score: s });
+    } else {
+      let worstIdx = 0;
+      for(let j=1;j<cap;j++) if(topK[j].score < topK[worstIdx].score) worstIdx = j;
+      if(s > topK[worstIdx].score) topK[worstIdx] = { namespace: cand.namespace, key: cand.key, value: cand.value, score: s };
+    }
+  }
+  topK.sort((a,b)=> b.score - a.score);
+  return topK;
+}
+
+// A typed query is an autocomplete filter, not a fuzzy match: anything containing it
+// is a hit, ranked by how early and how tightly it lands. baseFuzzyScore is wrong for
+// this -- it divides by candidate length, so "login" scores 0.25 against
+// "auth login title" and falls below the threshold, i.e. typing would find nothing.
+function containmentScore(queryNorm, candNorm){
+  if(!queryNorm || !candNorm) return 0;
+  const idx = candNorm.indexOf(queryNorm);
+  if(idx < 0) return 0;
+  const position = 1 - Math.min(idx, 20) / 21;
+  const tightness = queryNorm.length / Math.max(queryNorm.length, candNorm.length);
+  return 0.5 + 0.3 * position + 0.2 * tightness;
+}
+
+// Rank the pool against ONE row, for the dropdown attached to its Key field.
+function suggestForItem(item, query, threshold=0.3){
+  const pool = suggestionPool[suggestionLanguage()] || [];
+  const typedQuery = normalizeKey(String(query || '').trim());
+  if(typedQuery){
+    // Keys first, then values, so typing a word from the translation also finds it.
+    return topMatches(pool, cand => Math.max(
+      containmentScore(typedQuery, cand.normKey),
+      0.9 * containmentScore(typedQuery, cand.norm),
+    ), threshold);
+  }
+  // Untouched field: rank by the node's text and the row's current key. This is what
+  // makes the list worth opening on focus alone, and it replaces the old bulk pass.
+  const valueQuery = normalizeVal(item.text);
+  const keyQuery = normalizeKey(item.localKey || '');
+  if(!valueQuery && !keyQuery) return [];
+  // Pre-compute tokens once, not once per candidate
+  const valueQTokens = valueQuery.split(' ');
+  const valueQSet = new Set(valueQTokens);
+  const keyQTokens = keyQuery.split(' ');
+  const keyQSet = new Set(keyQTokens);
+  return topMatches(pool, cand => combinedScore(valueQuery, valueQTokens, valueQSet, keyQuery, keyQTokens, keyQSet, cand), threshold);
+}
+
+let suggestionPoolRefreshTimer = null;
+function scheduleSuggestionPoolRefresh(){
+  clearTimeout(suggestionPoolRefreshTimer);
+  suggestionPoolRefreshTimer = setTimeout(() => { ensureSuggestionPoolReady(); }, 250);
+}
+
+// Load the dictionaries listed in "Suggest from namespaces" and (re)build the ranking
+// pool. Cheap to call repeatedly — fetches are cached per language+namespace.
+async function ensureSuggestionPoolReady(){
   const nsList = parseSuggestNamespaces();
-  if(!nsList.length){ currentItems.forEach(i => i.suggestions = []); renderTable(); return; }
-  await ensureSuggestNamespacesLoaded(s, lang, nsList);
-  suggestForItems(lang, nsList);
-  renderTable();
+  if(!nsList.length) return;
+  await ensureSuggestNamespacesLoaded(collectSettings(), suggestionLanguage(), nsList);
+}
+
+// Fill the shared dropdown with key suggestions for one row's Key field. With no
+// namespaces configured there is nothing to offer, so the list stays shut. The pool
+// load is lazy, so the very first focus may have to fetch — hence the interim row.
+async function showKeySuggestions(anchor, item, query, onPick){
+  if(document.activeElement !== anchor) return;
+  if(!parseSuggestNamespaces().length){ closeNsDropdown(); return; }
+  if(!suggestionPool[suggestionLanguage()]){
+    openNsDropdown(anchor, [], null, 'Loading suggestions\u2026');
+    await ensureSuggestionPoolReady();
+    if(document.activeElement !== anchor) return; // focus left while fetching
+  }
+  const entries = suggestForItem(item, query).map(sug => ({
+    // Same shape as the layer name, so the dropdown reads like the canvas.
+    label: sug.namespace ? `${sug.key} (${sug.namespace})` : sug.key,
+    hint: (sug.value || '').replace(/\s+/g, ' ').slice(0, 80),
+    namespace: sug.namespace,
+    key: sug.key,
+  }));
+  openNsDropdown(anchor, entries, onPick, 'No matching keys');
 }
 
 // =====================
@@ -1100,15 +1290,15 @@ async function updateSuggestionsForCurrent(){
 // =====================
 const nsSuggestCache = {}; // key: `${projectId}|${version}|${language}` -> string[] namespaces
 let nsDropdownEl = null;
-let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '', onPick: null };
+let nsDropdownState = { open: false, items: [], activeIndex: -1, anchor: null, cacheKey: '', onPick: null, emptyText: '' };
 
 function getNsCacheKey(s, lang){
-  return `${s.projectId}|${s.version}|${lang}`;
+  return `${s.apiBaseUrl}|${s.projectId}|${s.version}|${lang}`;
 }
 
 async function fetchNamespacesFromApi(s, lang){
-  const url = `https://api.locize.app/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
-  const res = await fetch(url);
+  const url = `${s.apiBaseUrl}/download/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.version)}/${encodeURIComponent(lang)}`;
+  const res = await fetch(noCacheUrl(url), NO_STORE);
   if(!res.ok) throw new Error('HTTP '+res.status);
   const data = await res.json();
   // Expect array of objects with key like project/version/lang/namespace
@@ -1181,12 +1371,36 @@ function ensureDropdownEl(){
 }
 
 function positionDropdown(anchor){
-  if(!nsDropdownEl || !anchor) return;
+  if(!anchor) return;
+  // A detached anchor measures as an all-zero rect, which would park the list in the
+  // document's top-left corner. It has no field to point at any more, so close it.
+  if(!anchor.isConnected){ closeNsDropdown(); return; }
+  // Create the element if it isn't there yet. openNsDropdown positions before it
+  // renders, so on the very first open this used to bail out on a null nsDropdownEl
+  // and the dropdown was shown with no left/top -- which, being position:absolute,
+  // drops it at its static position as the last child of <body>, off-screen.
+  const el = ensureDropdownEl();
   const r = anchor.getBoundingClientRect();
-  nsDropdownEl.style.minWidth = r.width + 'px';
-  nsDropdownEl.style.left = Math.round(window.scrollX + r.left) + 'px';
-  nsDropdownEl.style.top = Math.round(window.scrollY + r.bottom + 2) + 'px';
+  el.style.minWidth = r.width + 'px';
+  // A plugin window is small and cannot be scrolled past, so the list has to fit in
+  // it: drop below the field when there is room, otherwise flip above, and never let
+  // it hang over the right edge. Callers render before positioning so that
+  // offsetWidth/offsetHeight are the real, laid-out size.
+  const gap = 2, margin = 4;
+  const spaceBelow = window.innerHeight - r.bottom - margin;
+  const spaceAbove = r.top - margin;
+  const flip = el.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
+  const top = flip ? Math.max(margin, r.top - el.offsetHeight - gap) : r.bottom + gap;
+  const left = Math.max(margin, Math.min(r.left, window.innerWidth - el.offsetWidth - margin));
+  el.style.left = Math.round(window.scrollX + left) + 'px';
+  el.style.top = Math.round(window.scrollY + top) + 'px';
 }
+
+// An entry is either a plain string (the namespace pickers) or a { label, hint }
+// object (key suggestions, where the hint previews the translation's value).
+// onPick always receives the entry as given, so string callers are unaffected.
+function dropdownLabel(entry){ return typeof entry === 'string' ? entry : String(entry.label || ''); }
+function dropdownHint(entry){ return typeof entry === 'string' ? '' : String(entry.hint || ''); }
 
 function renderNsDropdown(items){
   const el = ensureDropdownEl();
@@ -1194,36 +1408,65 @@ function renderNsDropdown(items){
   if(!items.length){
     const empty = document.createElement('div');
     empty.className = 'ns-suggest-empty';
-    empty.textContent = 'No namespaces';
+    empty.textContent = nsDropdownState.emptyText || 'No namespaces';
     el.appendChild(empty);
   } else {
-    items.forEach((ns, idx) => {
+    items.forEach((entry, idx) => {
       const it = document.createElement('div');
       it.className = 'ns-suggest-item' + (idx === nsDropdownState.activeIndex ? ' active' : '');
-      it.textContent = ns;
-      it.addEventListener('mousedown', (e) => { e.preventDefault(); if(nsDropdownState.onPick) nsDropdownState.onPick(ns); });
+      const label = document.createElement('div');
+      label.className = 'ns-suggest-label';
+      label.textContent = dropdownLabel(entry);
+      it.appendChild(label);
+      const hint = dropdownHint(entry);
+      if(hint){
+        const hintEl = document.createElement('div');
+        hintEl.className = 'ns-suggest-hint';
+        hintEl.textContent = hint;
+        it.appendChild(hintEl);
+      }
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); if(nsDropdownState.onPick) nsDropdownState.onPick(entry); });
       el.appendChild(it);
     });
   }
 }
 
-function openNsDropdown(anchor, items, onPick){
+function openNsDropdown(anchor, items, onPick, emptyText){
   nsDropdownState.open = true;
   nsDropdownState.items = items;
   nsDropdownState.activeIndex = items.length ? 0 : -1;
   nsDropdownState.anchor = anchor;
   nsDropdownState.onPick = onPick || null;
-  positionDropdown(anchor);
+  nsDropdownState.emptyText = emptyText || 'No namespaces';
   renderNsDropdown(items);
   nsDropdownEl.style.display = 'block';
+  positionDropdown(anchor);
 }
 
 function updateNsDropdown(anchor, items){
   if(!nsDropdownState.open){ openNsDropdown(anchor, items); return; }
   nsDropdownState.items = items;
   nsDropdownState.activeIndex = items.length ? Math.min(nsDropdownState.activeIndex, items.length-1) : -1;
-  positionDropdown(anchor);
   renderNsDropdown(items);
+  positionDropdown(anchor);
+}
+
+// Closing on blur is deferred so that a click on a dropdown item lands first. In that
+// window the focus can move on, so the timer must not close a list it no longer owns:
+// by then another field may have opened its own, or the focus may have come back here.
+function closeDropdownFor(anchor){
+  if(nsDropdownState.anchor !== anchor) return;   // another field owns the list now
+  if(document.activeElement === anchor) return;   // focus returned before the timer
+  closeNsDropdown();
+}
+
+// The dropdown is anchored to a live element, but a re-render replaces the row it
+// lives in -- and Chrome does NOT fire blur when a focused node is removed, so the
+// blur-driven close never runs. Call this after anything that rebuilds the table.
+function closeDropdownIfAnchorDetached(){
+  if(nsDropdownState.open && nsDropdownState.anchor && !nsDropdownState.anchor.isConnected){
+    closeNsDropdown();
+  }
 }
 
 function closeNsDropdown(){
@@ -1231,6 +1474,7 @@ function closeNsDropdown(){
   nsDropdownState.items = [];
   nsDropdownState.activeIndex = -1;
   nsDropdownState.anchor = null;
+  nsDropdownState.emptyText = '';
   if(nsDropdownEl){ nsDropdownEl.style.display = 'none'; }
 }
 
@@ -1260,13 +1504,13 @@ function commitNamespaceChoice(ns){
     els.suggestNamespaces.value += ', ';
   }
   // trigger update of suggestions pool
-  scheduleSuggestionsRefresh();
+  scheduleSuggestionPoolRefresh();
   closeNsDropdown();
   els.suggestNamespaces.focus();
 }
 
 function onSuggestInputChange(){
-  scheduleSuggestionsRefresh();
+  scheduleSuggestionPoolRefresh();
   (async () => {
     const list = await ensureNamespaceSuggestionsLoaded();
     if(!list || !list.length) { closeNsDropdown(); return; }
@@ -1301,7 +1545,7 @@ function onSuggestInputKeydown(e){
 els.suggestNamespaces.addEventListener('input', onSuggestInputChange);
 els.suggestNamespaces.addEventListener('focus', onSuggestInputFocus);
 els.suggestNamespaces.addEventListener('keydown', onSuggestInputKeydown);
-els.suggestNamespaces.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
+els.suggestNamespaces.addEventListener('blur', () => setTimeout(() => closeDropdownFor(els.suggestNamespaces), 120));
 window.addEventListener('resize', ()=> positionDropdown(nsDropdownState.anchor));
 window.addEventListener('scroll', ()=> positionDropdown(nsDropdownState.anchor), true);
 
@@ -1317,12 +1561,15 @@ function persistScanNamespace(){
   const v = (els.scanNamespace.value || '').trim();
   const p = projects.find(x => x.id === activeProjectId);
   if(p){ p.lastNamespace = v; pm({ type: 'set-project-namespace', id: activeProjectId, namespace: v }); }
+  // New keys are generated under this namespace, so the table has to be rebuilt.
+  if((v || DEFAULT_NS) !== lastScannedNamespace) requestScan();
 }
 
 // Restore the field from the active project's last-used namespace (or default).
 function applyActiveProjectNamespace(){
   const p = projects.find(x => x.id === activeProjectId);
   els.scanNamespace.value = (p && p.lastNamespace) || DEFAULT_NS;
+  requestScan();
 }
 
 function onScanNsFocus(){
@@ -1348,7 +1595,7 @@ function onScanNsInput(){
 els.scanNamespace.addEventListener('focus', onScanNsFocus);
 els.scanNamespace.addEventListener('input', onScanNsInput);
 els.scanNamespace.addEventListener('keydown', onSuggestInputKeydown);
-els.scanNamespace.addEventListener('blur', () => { setTimeout(closeNsDropdown, 120); persistScanNamespace(); });
+els.scanNamespace.addEventListener('blur', () => { setTimeout(() => closeDropdownFor(els.scanNamespace), 120); persistScanNamespace(); });
 
 els.languageSelect.addEventListener('change', async () => {
   const s = collectSettings(); if(!s.projectId || !s.version){ setStatus('Fill in settings'); return; }
@@ -1383,7 +1630,7 @@ els.languageSelect.addEventListener('change', async () => {
   pm({ type: 'get-translatable' });
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
   // update suggestions if namespaces provided
-  updateSuggestionsForCurrent();
+  ensureSuggestionPoolReady();
   // preload namespaces autocomplete list for new language
   ensureNamespaceSuggestionsLoaded();
 });
@@ -1424,15 +1671,8 @@ els.updateTranslations.addEventListener('click', async () => {
 
   pm({ type: 'get-translatable' });
   setStatus('Done in '+ ((Date.now()-sTime)/1000).toFixed(1)+'s', true);
-  updateSuggestionsForCurrent();
+  ensureSuggestionPoolReady();
   els.updateTranslations.disabled = false;
-});
-
-els.restoreNames.addEventListener('click', () => {
-  const selected = currentItems.filter(i => i.selected !== false);
-  const targets = selected.length ? selected : currentItems;
-  pm({ type: 'restore-names', items: targets.map(t => ({ nodeId: t.nodeId })) });
-  setStatus('Restoring names...');
 });
 
 // Overflow ("⋯") menus — generic open/close for collapsing secondary actions.
@@ -1463,31 +1703,10 @@ els.restoreNames.addEventListener('click', () => {
   document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeAll(null); });
 })();
 
-els.applyTopSuggestions.addEventListener('click', async () => {
-  await updateSuggestionsForCurrent();
-  const selected = currentItems.filter(i => i.selected !== false);
-  const targets = selected.length ? selected : currentItems;
-  let applied = 0, skipped = 0;
-  for(const item of targets){
-    const sug = Array.isArray(item.suggestions) && item.suggestions[0];
-    if(sug){
-      item.namespace = sug.namespace;
-      item.localKey = sug.key;
-      recomputeKey(item);
-      // keep selected on, do not auto-apply to nodes
-      item.selected = item.selected !== false;
-      applied++;
-    } else {
-      skipped++;
-    }
-  }
-  renderTable();
-  scheduleStatusRefresh();
-  setStatus(`Applied top suggestions: ${applied}${skipped ? `, skipped: ${skipped}` : ''}`);
-});
-
 function validateSettings(s){
   if(!s.projectId || !s.apiKey){ setStatus('ProjectId and ApiKey are required'); return false; }
+  const problem = apiBaseProblem(s.apiBaseUrl);
+  if(problem){ setStatus(problem); return false; }
   return true;
 }
 
@@ -1498,7 +1717,7 @@ function escapeHtml(str) {
 async function fetchLanguagesList(){
   const s = collectSettings(); if(!s.projectId) return;
   try {
-    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`);
+    const res = await fetch(noCacheUrl(`${s.apiBaseUrl}/languages/${s.projectId}`), NO_STORE);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     const langs = Object.keys(data);
@@ -1511,8 +1730,8 @@ async function fetchLanguagesList(){
 
 async function fetchTranslations(s, language, namespace){
   const ns = encodeURIComponent(namespace);
-  const url = `https://api.locize.app/${s.projectId}/${s.version}/${language}/${ns}`;
-  const res = await fetch(url);
+  const url = `${s.apiBaseUrl}/${s.projectId}/${s.version}/${language}/${ns}`;
+  const res = await fetch(noCacheUrl(url), NO_STORE);
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
@@ -1530,24 +1749,58 @@ async function uploadSelectedKeys(items, s){
     if(!byNs.has(ns)) byNs.set(ns, []);
     byNs.get(ns).push({ key: local, value: String(it.text ?? '') });
   }
-  const totalKeys = Array.from(byNs.values()).reduce((acc, arr) => acc + arr.length, 0);
-  if(totalKeys === 0){ setStatus('Nothing to upload'); return; }
+  if(byNs.size === 0){ setStatus('Nothing to upload'); return; }
 
-  setStatus(`Uploading keys to ${lang} (bulk update)${doAutotranslate ? ' [autotranslate]' : ''}...`);
+  setStatus(`Checking ${byNs.size} namespace(s) for new/changed values...`);
+
+  // Diff against what's currently in locize before sending anything. A key whose
+  // value is unchanged is skipped entirely (not sent at all) -- per locize's API,
+  // "a value pushed without the needsReview field confirms that key", so re-sending
+  // unchanged content would silently clear a needsReview flag someone else set.
+  // Anything new or actually different gets needsReview:true, so it surfaces in
+  // locize's own review queue without touching the key name.
+  const nsPayloads = [];
+  for(const [ns, entries] of byNs.entries()){
+    let currentMap = {};
+    try {
+      currentMap = flattenToMap(await fetchTranslations(s, lang, ns));
+    } catch(e){
+      if(!String(e && e.message ? e.message : e).includes('404')){
+        setStatus(`✗ ${ns}: couldn't read current translations (${e && e.message ? e.message : e})`, true);
+        continue;
+      }
+      // 404 = namespace doesn't exist yet in this language -> everything below is new.
+    }
+    const payload = {};
+    let changed = 0;
+    for(const { key, value } of entries){
+      const current = Object.prototype.hasOwnProperty.call(currentMap, key) ? currentMap[key] : undefined;
+      if(current === value) continue; // unchanged -> don't touch it
+      payload[key] = { value, needsReview: true };
+      changed++;
+    }
+    const skipped = entries.length - changed;
+    if(changed > 0) nsPayloads.push({ ns, payload, changed, skipped });
+    else setStatus(`${ns}: nothing changed (${skipped} unchanged), skipped`, true);
+  }
+
+  const totalKeys = nsPayloads.reduce((acc, p) => acc + p.changed, 0);
+  if(totalKeys === 0){ setStatus('Nothing to upload (no new or changed values)'); return; }
+
+  setStatus(`Uploading ${totalKeys} new/changed key(s) to ${lang} (bulk update)${doAutotranslate ? ' [autotranslate]' : ''}...`);
   let sentKeys = 0;
   setProgress(0);
-  for(const [ns, entries] of byNs.entries()){
-    setStatus(`Namespace ${ns}: ${entries.length} key(s)` , true);
+  for(const { ns, payload, changed, skipped } of nsPayloads){
+    setStatus(`Namespace ${ns}: ${changed} new/changed key(s)${skipped ? `, ${skipped} unchanged (skipped)` : ''}`, true);
     // chunk to 1000 keys per request
-    for(const chunk of chunkArray(entries, 1000)){
-      const payload = {};
-      for(const {key, value} of chunk){ payload[key] = value; }
+    for(const chunkEntries of chunkArray(Object.entries(payload), 1000)){
+      const chunkPayload = Object.fromEntries(chunkEntries);
       try {
-        const resInfo = await updateTranslationsBatch(s, lang, ns, payload, doAutotranslate);
-        sentKeys += chunk.length;
+        const resInfo = await updateTranslationsBatch(s, lang, ns, chunkPayload, doAutotranslate);
+        sentKeys += chunkEntries.length;
         setProgress(sentKeys/totalKeys*100);
         const note = resInfo?.note ? ` (${resInfo.note})` : '';
-        setStatus(`✓ ${ns}: +${chunk.length} translations${note}`, true);
+        setStatus(`✓ ${ns}: +${chunkEntries.length} translations${note}`, true);
       } catch(e){
         setStatus(`✗ ${ns}: ${e && e.message ? e.message : e}`, true);
       }
@@ -1555,7 +1808,7 @@ async function uploadSelectedKeys(items, s){
   }
   clearRemoteCache();
   await refreshSyncStatus();
-  setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys}`, true);
+  setStatus(`Done. Uploaded: ${sentKeys}/${totalKeys} (new/changed)`, true);
 }
 
 function setProgress(percent){
@@ -1582,7 +1835,7 @@ async function fetchWithAuth(url, options, apiKey){
 async function updateTranslationsBatch(s, language, namespace, body, autotranslate=false){
   const ns = encodeURIComponent(namespace || DEFAULT_NS);
   const q = autotranslate ? '?autotranslate=true' : '';
-  const url = `https://api.locize.app/update/${s.projectId}/${s.version}/${language}/${ns}${q}`;
+  const url = `${s.apiBaseUrl}/update/${s.projectId}/${s.version}/${language}/${ns}${q}`;
   const opts = {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
@@ -1623,7 +1876,7 @@ async function verifyCredentials(s, signal, seq){
   const isCurrent = () => seq === verifySeq;
   if(isCurrent()) setStatus('Verifying credentials...');
   try {
-    const res = await fetch(`https://api.locize.app/languages/${s.projectId}`, { signal });
+    const res = await fetch(noCacheUrl(`${s.apiBaseUrl}/languages/${s.projectId}`), { ...NO_STORE, signal });
     if(res.status === 404){ if(isCurrent()) setStatus('Project not found (404)', true); return false; }
     if(res.status === 401 || res.status === 403){ if(isCurrent()) setStatus('Unauthorized to access project: '+res.status, true); return false; }
     if(!res.ok){ if(isCurrent()) setStatus('Project check failed: HTTP '+res.status, true); return false; }
@@ -1644,6 +1897,24 @@ window.addEventListener('message', (event) => {
       renderProjectsUI();
       applyActiveProjectNamespace();
       refreshActiveProject();
+      break;
+    }
+    case 'keys-applied': {
+      // The nodes are bound now and their layers read "localKey (namespace)" — mirror
+      // the names the plugin actually wrote so the table matches the canvas without
+      // waiting for a re-scan. Renames that failed come back with the unchanged name.
+      const names = new Map((msg.items || []).map(x => [x.nodeId, x.name]));
+      currentItems.forEach(it => {
+        if(names.has(it.nodeId)){
+          if(names.get(it.nodeId)) it.name = names.get(it.nodeId);
+          it.existing = true;
+        }
+      });
+      renderTable();
+      setStatus(`Keys applied to ${names.size} node(s)`);
+      if(msg.renameFailed){
+        setStatus(`⚠ ${msg.renameFailed} layer(s) couldn't be renamed (inside a component instance?)`, true);
+      }
       break;
     }
     case 'keys-cleared': {
@@ -1673,7 +1944,7 @@ window.addEventListener('message', (event) => {
       pm({ type: 'get-namespaces' });
       scheduleStatusRefresh();
       // update suggestions if namespaces provided
-      updateSuggestionsForCurrent();
+      ensureSuggestionPoolReady();
       break;
     }
     case 'assigned-result': {
@@ -1703,7 +1974,7 @@ window.addEventListener('message', (event) => {
       renderTable();
       scheduleStatusRefresh();
       // update suggestions if namespaces provided
-      updateSuggestionsForCurrent();
+      ensureSuggestionPoolReady();
       break;
     }
     case 'translatable-result': {
@@ -1714,10 +1985,7 @@ window.addEventListener('message', (event) => {
       break;
     }
     case 'selection-change': {
-      if(lastMode === 'scan') {
-        const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-        pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
-      }
+      requestScan();
       if(activeTab === 'translate') {
         pm({ type: 'get-translatable' });
       }
@@ -1740,23 +2008,6 @@ function updateNamespaces(list){
   els.nsListInfo.textContent = detectedNamespaces.length ? 'Namespaces: '+ detectedNamespaces.join(', ') : 'No namespaces found';
   updateTranslationsButtonState();
 }
-
-// Reflect current mode to UI (active state for Scan selection)
-function reflectMode(){
-  const isScan = lastMode === 'scan';
-  els.scanSelection.classList.toggle('active', isScan);
-  els.scanSelection.setAttribute('aria-pressed', isScan ? 'true' : 'false');
-}
-
-// trigger suggestions by button
-els.suggestKeys.addEventListener('click', async () => {
-  await updateSuggestionsForCurrent();
-  setStatus('Suggestions updated');
-});
-
-
-// Initial reflect
-reflectMode();
 
 // Tabs logic
 (function initTabs(){

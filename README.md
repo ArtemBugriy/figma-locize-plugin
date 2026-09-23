@@ -4,22 +4,89 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 
 ## Features
 - Namespace management: create new namespaces and auto-detect existing ones from assigned keys
-- Bulk scan of current selection (or entire page when nothing selected) for TEXT nodes
+- The Key Management table follows the Figma selection automatically — select layers and their TEXT nodes appear, no scan button to press
 - Inline editing of layer text with live sync back to the Figma node (fonts auto-loaded)
 - Persistent per-node selection state (unchecked items remembered across sessions) + “Hide unchecked” filter
-- Fuzzy key suggestion engine: suggests existing keys from chosen namespaces (configurable list) using normalized text similarity
-- One-click “Apply all top suggestions” to rapidly re-use existing keys
+- Key autocomplete: editing a row's Key field offers existing keys from the chosen namespaces — ranked by the node's text on focus, filtered by what you type; picking one fills in both the namespace and the key
 - Sync status coloring (synced / unsynced / missing) comparing local text vs remote translations per language
 - Remote translation application: switch language and apply translations to all keyed nodes
 - Upload selected base language strings to locize with progress indicator (batched, cached)
 - Optional autotranslate toggle for the base language workflow (only enabled when viewing base language)
-- Original node name preservation and restore function after replacing names with keys
+- Layer names carry the key and namespace (`localKey (namespace)`) so the file is readable without the plugin — see [Layer naming](#layer-naming)
+- Original node name preservation: the pre-plugin layer name is stored on the node and restored when the key is cleared
 - Select-all / bulk selection management with table row cap (100) and overflow indicator
-- Safe network scope (only calls https://api.locize.app)
+- Per-project API base URL: point a project at locize's Standard CDN (`https://api.lite.locize.app`) or any other locize host — see [API base URL](#api-base-url)
+- Safe network scope (only calls locize hosts)
 - Local clientStorage persistence for credentials, base language, version, and selection states
 - Font preloading before mutating characters prevents missing font errors
 - Simple flat-map handling of nested JSON translation structures
 - Caching of fetched namespaces per language to minimize API calls
+
+---
+
+## API base URL
+
+Each project in **Settings** has its own **API base URL**. Leave it empty for the default
+`https://api.locize.app` — locize's **Pro** CDN. Projects on the **Standard** CDN use
+`https://api.lite.locize.app`. Focusing the field offers both; it stays free text, so
+any other locize host can be typed in.
+
+Every request — languages, translations, uploads, sync status — is built from this value,
+and it is part of the namespace cache key, so two projects on different hosts never share
+cached data. Trailing slashes are stripped for you.
+
+**Caching.** Every read is sent with `?cache=no` and `cache: 'no-store'`. A version's
+content changes under a fixed URL, so a cached response misreports sync status — most
+visibly right after an upload, when the plugin re-reads to confirm what it just wrote.
+`?cache=no` is the parameter locize documents for the Standard CDN, whose cache is
+fixed at one hour; the Pro CDN has no bypass parameter and its TTL is configured per
+version in the locize project settings, so if stale reads persist there, lower that
+version's `Cache-Control`. Uploads are not cached and carry neither.
+
+**Constraint:** Figma only lets the plugin reach hosts whitelisted in `manifest.json`
+(`networkAccess.allowedDomains`), currently `https://*.locize.app`. A base URL on any other
+domain is blocked by Figma with no useful error, so the plugin warns when you save such a
+project and refuses to upload with it. To use a host outside `*.locize.app`, add it to
+`manifest.json` and reload the plugin.
+
+---
+
+## Layer naming
+
+When you press **Apply keys to nodes**, every keyed TEXT layer is renamed to:
+
+```
+<localKey> (<namespace>)
+```
+
+for example the key `Common.submit_button` produces the layer name `submit_button (Common)`.
+
+The point is that the full key lives **on the canvas**, not only in the plugin's private
+data: anyone reading the Figma file — a developer, a REST API consumer, another plugin —
+can reconstruct `namespace.localKey` from the layer name alone.
+
+**How to parse a layer name back into a key**
+
+- Take the **last** parenthesised group as the namespace, and everything before it
+  (trimmed) as the local key. The local key may itself contain parentheses:
+  `Submit (draft) (Common)` → namespace `Common`, local key `Submit (draft)`.
+- Dots inside the local key are preserved: the key is split on its **first** dot only, so
+  `Common.forms.submit` becomes `forms.submit (Common)` and joins back the same way.
+- A key with no namespace (possible if the namespace field is cleared in the table) gets
+  no suffix — the layer name is just the key.
+
+**Invariant:** a layer bound to a locize key always carries its namespace in the name.
+There is deliberately no "restore original names" action for bound layers; **Clear keys**
+unbinds a node *and* puts its original name back, in one step.
+
+**Legacy layers.** Older versions of the plugin renamed layers to the dotted
+`namespace.localKey` string (or left the name untouched). Those layers keep their old name
+until keys are applied to them again — to migrate a file, select those layers on the
+canvas (the table fills in automatically) and press **Apply keys to nodes**.
+
+Layer names inside component instances are read-only in Figma, so the rename is skipped
+there; the plugin reports how many layers it could not rename instead of claiming success.
+The key itself is still written — only the name can't follow.
 
 ---
 
@@ -42,6 +109,13 @@ Next, install TypeScript using the command:
 Finally, in the directory of your plugin, get the latest type definitions for the plugin API by running:
 
   npm install --save-dev @figma/plugin-typings
+
+Run the test suite with:
+
+  npm test
+
+It boots the real ui.html in jsdom and covers the suggestion dropdown, the locize
+request layer and the Settings form.
 
 If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
 is already valid Typescript code.
