@@ -1320,8 +1320,18 @@ function positionDropdown(anchor){
   const el = ensureDropdownEl();
   const r = anchor.getBoundingClientRect();
   el.style.minWidth = r.width + 'px';
-  el.style.left = Math.round(window.scrollX + r.left) + 'px';
-  el.style.top = Math.round(window.scrollY + r.bottom + 2) + 'px';
+  // A plugin window is small and cannot be scrolled past, so the list has to fit in
+  // it: drop below the field when there is room, otherwise flip above, and never let
+  // it hang over the right edge. Callers render before positioning so that
+  // offsetWidth/offsetHeight are the real, laid-out size.
+  const gap = 2, margin = 4;
+  const spaceBelow = window.innerHeight - r.bottom - margin;
+  const spaceAbove = r.top - margin;
+  const flip = el.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
+  const top = flip ? Math.max(margin, r.top - el.offsetHeight - gap) : r.bottom + gap;
+  const left = Math.max(margin, Math.min(r.left, window.innerWidth - el.offsetWidth - margin));
+  el.style.left = Math.round(window.scrollX + left) + 'px';
+  el.style.top = Math.round(window.scrollY + top) + 'px';
 }
 
 // An entry is either a plain string (the namespace pickers) or a { label, hint }
@@ -1366,17 +1376,17 @@ function openNsDropdown(anchor, items, onPick, emptyText){
   nsDropdownState.anchor = anchor;
   nsDropdownState.onPick = onPick || null;
   nsDropdownState.emptyText = emptyText || 'No namespaces';
-  positionDropdown(anchor);
   renderNsDropdown(items);
   nsDropdownEl.style.display = 'block';
+  positionDropdown(anchor);
 }
 
 function updateNsDropdown(anchor, items){
   if(!nsDropdownState.open){ openNsDropdown(anchor, items); return; }
   nsDropdownState.items = items;
   nsDropdownState.activeIndex = items.length ? Math.min(nsDropdownState.activeIndex, items.length-1) : -1;
-  positionDropdown(anchor);
   renderNsDropdown(items);
+  positionDropdown(anchor);
 }
 
 // The dropdown is anchored to a live element, but a re-render replaces the row it
