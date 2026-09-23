@@ -404,6 +404,20 @@ const DEFAULT_NS = 'UnknownFeatureNs';
 // property of that project, hence the per-project setting.
 const DEFAULT_API_BASE = 'https://api.locize.app';
 
+// Offered as suggestions on the API base URL field. The field stays free text -- a
+// project could sit behind some other locize host -- so this is a shortcut, not a
+// closed list; apiBaseProblem() still vets whatever ends up there.
+const LOCIZE_API_HOSTS = [
+  { label: DEFAULT_API_BASE, hint: 'Pro CDN \u00b7 default \u00b7 cache TTL set per version in locize' },
+  { label: 'https://api.lite.locize.app', hint: 'Standard CDN \u00b7 fixed 1 hour cache' },
+];
+
+function filterApiHosts(query){
+  const q = String(query || '').trim().toLowerCase();
+  if(!q) return LOCIZE_API_HOSTS;
+  return LOCIZE_API_HOSTS.filter(h => h.label.toLowerCase().includes(q) || h.hint.toLowerCase().includes(q));
+}
+
 // Reads must not be served from a cache: a version's content changes under the same
 // URL, so a stale hit shows the wrong sync status -- most visibly right after an
 // upload, when the plugin re-reads to confirm what it just wrote.
@@ -939,10 +953,32 @@ function renderProjectsUI(){
 
     const row3 = document.createElement('div');
     row3.className = 'project-row';
-    row3.appendChild(mk('API base URL', 'apiBaseUrl', 'text', true, {
+    const baseUrlLabel = mk('API base URL', 'apiBaseUrl', 'text', true, {
       placeholder: DEFAULT_API_BASE,
       title: `Host serving the locize API for this project. Leave empty for ${DEFAULT_API_BASE} (locize's Pro CDN); projects on the Standard CDN use https://api.lite.locize.app. Must be a *.locize.app host - other domains are blocked by manifest.json.`,
-    }));
+    });
+    // Autocomplete of the known CDN hosts, on the shared dropdown.
+    const baseUrlInput = baseUrlLabel.querySelector('input');
+    const showApiHosts = (query) => {
+      const items = filterApiHosts(query);
+      if(items.length) openNsDropdown(baseUrlInput, items, pickApiHost, 'No known hosts');
+      else closeNsDropdown();
+    };
+    function pickApiHost(entry){
+      baseUrlInput.value = entry.label;
+      // Setting .value fires no input event, so mirror what that handler would do.
+      p.apiBaseUrl = entry.label;
+      clearRemoteCache();
+      closeNsDropdown();
+      renderProjectSelect();
+    }
+    // On focus show both hosts: the field usually already holds one of them, and the
+    // point of opening the list is to see the alternative. Typing then filters.
+    baseUrlInput.addEventListener('focus', () => showApiHosts(''));
+    baseUrlInput.addEventListener('input', () => showApiHosts(baseUrlInput.value));
+    baseUrlInput.addEventListener('keydown', onSuggestInputKeydown);
+    baseUrlInput.addEventListener('blur', () => setTimeout(closeNsDropdown, 120));
+    row3.appendChild(baseUrlLabel);
     card.appendChild(row3);
 
     els.projectsList.appendChild(card);

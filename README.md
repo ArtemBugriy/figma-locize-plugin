@@ -28,7 +28,8 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 
 Each project in **Settings** has its own **API base URL**. Leave it empty for the default
 `https://api.locize.app` — locize's **Pro** CDN. Projects on the **Standard** CDN use
-`https://api.lite.locize.app`.
+`https://api.lite.locize.app`. Focusing the field offers both; it stays free text, so
+any other locize host can be typed in.
 
 Every request — languages, translations, uploads, sync status — is built from this value,
 and it is part of the namespace cache key, so two projects on different hosts never share
