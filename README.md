@@ -4,7 +4,7 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 
 ## Features
 - Namespace management: create new namespaces and auto-detect existing ones from assigned keys
-- Bulk scan of current selection (or entire page when nothing selected) for TEXT nodes
+- The Key Management table follows the Figma selection automatically — select layers and their TEXT nodes appear, no scan button to press
 - Inline editing of layer text with live sync back to the Figma node (fonts auto-loaded)
 - Persistent per-node selection state (unchecked items remembered across sessions) + “Hide unchecked” filter
 - Fuzzy key suggestion engine: suggests existing keys from chosen namespaces (configurable list) using normalized text similarity
@@ -72,8 +72,8 @@ unbinds a node *and* puts its original name back, in one step.
 
 **Legacy layers.** Older versions of the plugin renamed layers to the dotted
 `namespace.localKey` string (or left the name untouched). Those layers keep their old name
-until keys are applied to them again — to migrate a file, press **Get assigned**, select
-all, then **Apply keys to nodes**.
+until keys are applied to them again — to migrate a file, select those layers on the
+canvas (the table fills in automatically) and press **Apply keys to nodes**.
 
 Layer names inside component instances are read-only in Figma, so the rename is skipped
 there; the plugin reports how many layers it could not rename instead of claiming success.

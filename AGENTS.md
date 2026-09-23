@@ -19,7 +19,7 @@ Figma plugins run in two isolated JS contexts that can only communicate via `pos
 
 Key message types (defined in `code.ts` switch and `ui.html` handler):
 - `load-settings` / `settings-loaded` — load credentials from clientStorage
-- `scan-selection` → `scan-result` — collect TEXT nodes and generate keys
+- `scan-selection` → `scan-result` — collect TEXT nodes and generate keys. Sent automatically by `requestScan()` in `ui.html`: on `selection-change`, on project switch/load, and when the namespace or a scan option changes. There is no manual scan control
 - `apply-keys` → `keys-applied` — write `locize:key` plugin data to nodes, rename layers to `localKey (namespace)`; the reply carries the names actually written plus a `renameFailed` count
 - `get-assigned` → `assigned-result` — fetch already-keyed nodes
 - `apply-language` — apply a `TranslationMap` to nodes' `.characters`
@@ -78,7 +78,8 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 - **Layer naming:** `apply-keys` renames each bound layer to `localKey (namespace)` so readers outside the plugin can reconstruct the full key from the canvas. The name is rebuilt from the key every time (never appended to), and renaming throws inside component instances — caught and counted, not silent. See README “Layer naming”.
 - **Key uniqueness:** `generateKeys()` uses a `Set<string>` per scan run; appends `_2`, `_3` on collision.
 - **Font preloading:** always call `ensureFonts(nodes)` before mutating `.characters` to avoid runtime errors.
-- **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page).
+- **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page) — except `postScanResult()`, which reports `No selection` and empties the table.
+- **Selection-driven table:** the Key Management table is rebuilt from the current selection, so a re-scan discards unapplied row edits. Anything that triggers one goes through `requestScan()`; `lastScannedNamespace` suppresses redundant re-scans.
 - **Table row cap:** UI renders max `MAX_TABLE_ROWS = 100` rows; overflow shown as `+N items`.
 - **API base URL:** per-project setting (`apiBaseUrl`), defaulting to `https://api.locize.app`; the lite tier is `https://api.lite.locize.app`. `ui.html` builds every request from it — never hardcode the host.
 - **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `https://api.locize.app` and `https://*.locize.app`. A base URL outside that wildcard is blocked by Figma, so the UI warns before saving.

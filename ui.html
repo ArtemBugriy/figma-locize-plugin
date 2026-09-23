@@ -214,8 +214,8 @@
           <legend>Key management</legend>
           <div class="flex gap flex-wrap items-end">
             <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
-            <button id="scanSelection" class="button-primary">Scan selection</button>
           </div>
+          <div class="small mt-6px text-secondary">The table follows your Figma selection.</div>
           <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:24px;">
             <label class="checkbox">
               <input id="ignoreHidden" type="checkbox" checked />
@@ -334,7 +334,6 @@ const els = {
   saveProjects: document.getElementById('saveProjects'),
   projectSelect: document.getElementById('projectSelect'),
   activeProjectInfo: document.getElementById('activeProjectInfo'),
-  scanSelection: document.getElementById('scanSelection'),
   applyKeys: document.getElementById('applyKeys'),
   clearKeys: document.getElementById('clearKeys'),
   uploadKeys: document.getElementById('uploadKeys'),
@@ -367,8 +366,10 @@ let activeProjectId = '';
 let detectedNamespaces = [];
 let hideUnchecked = false;
 let currentLanguage = '';
-let lastMode = null;
 let activeTab = 'keys';
+// Namespace the current table was built with; guards against re-scanning (and so
+// discarding unapplied row edits) when the field is merely focused and left alone.
+let lastScannedNamespace = null;
 
 // Track verification sequence and allow cancellation
 let verifyController = null; // AbortController | null
@@ -953,13 +954,17 @@ els.projectSelect.addEventListener('change', () => {
   refreshActiveProject();
 });
 
-els.scanSelection.addEventListener('click', () => {
-  lastMode = 'scan';
-  reflectMode();
-  const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
+// The Key Management table always mirrors the current Figma selection — there is no
+// explicit "scan" step. Everything that changes what a scan would return calls this:
+// the selection itself, the namespace for new keys, and the two scan options.
+function requestScan(){
+  const ns = (els.scanNamespace.value || '').trim() || DEFAULT_NS;
+  lastScannedNamespace = ns;
   pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
-  persistScanNamespace();
-});
+}
+
+els.ignoreHidden.addEventListener('change', requestScan);
+els.mergeSameName.addEventListener('change', requestScan);
 
 els.hideUnchecked.addEventListener('change', () => {
   hideUnchecked = els.hideUnchecked.checked;
@@ -1359,12 +1364,15 @@ function persistScanNamespace(){
   const v = (els.scanNamespace.value || '').trim();
   const p = projects.find(x => x.id === activeProjectId);
   if(p){ p.lastNamespace = v; pm({ type: 'set-project-namespace', id: activeProjectId, namespace: v }); }
+  // New keys are generated under this namespace, so the table has to be rebuilt.
+  if((v || DEFAULT_NS) !== lastScannedNamespace) requestScan();
 }
 
 // Restore the field from the active project's last-used namespace (or default).
 function applyActiveProjectNamespace(){
   const p = projects.find(x => x.id === activeProjectId);
   els.scanNamespace.value = (p && p.lastNamespace) || DEFAULT_NS;
+  requestScan();
 }
 
 function onScanNsFocus(){
@@ -1803,10 +1811,7 @@ window.addEventListener('message', (event) => {
       break;
     }
     case 'selection-change': {
-      if(lastMode === 'scan') {
-        const ns = (els.scanNamespace.value || DEFAULT_NS).trim();
-        pm({ type: 'scan-selection', namespace: ns, ignoreHidden: !!els.ignoreHidden.checked, mergeSameName: !!els.mergeSameName.checked });
-      }
+      requestScan();
       if(activeTab === 'translate') {
         pm({ type: 'get-translatable' });
       }
@@ -1830,22 +1835,12 @@ function updateNamespaces(list){
   updateTranslationsButtonState();
 }
 
-// Reflect current mode to UI (active state for Scan selection)
-function reflectMode(){
-  const isScan = lastMode === 'scan';
-  els.scanSelection.classList.toggle('active', isScan);
-  els.scanSelection.setAttribute('aria-pressed', isScan ? 'true' : 'false');
-}
-
 // trigger suggestions by button
 els.suggestKeys.addEventListener('click', async () => {
   await updateSuggestionsForCurrent();
   setStatus('Suggestions updated');
 });
 
-
-// Initial reflect
-reflectMode();
 
 // Tabs logic
 (function initTabs(){
