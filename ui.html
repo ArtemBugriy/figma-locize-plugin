@@ -203,6 +203,11 @@
   .project-card .project-remove { position: absolute; top: 6px; right: 6px; min-width: 24px; padding: 2px 6px; line-height: 1; }
   .project-card .project-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
   .project-card label { min-width: 0; }
+
+  /* A disabled control receives no mouse events in Chromium, so its own title never
+     shows -- and these actions are disabled exactly when a user most wants to know
+     what they do. The wrapper is never disabled, so the tooltip stays reachable. */
+  .hint { display: inline-flex; }
 </style>
 </head>
 <body>
@@ -211,7 +216,7 @@
       <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="panel-keys" id="tab-keys">Key Management</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-translate" id="tab-translate">Translation</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-settings" id="tab-settings">Settings</button>
-      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);">v9</span>
+      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);" title="Plugin version and the build date of this UI file. If this date is older than your last edit, Figma is running a stale copy.">v9 · ui 2026-09-23 14:10</span>
     </div>
     <div class="tab-panels" id="tabPanels">
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
@@ -266,11 +271,11 @@
           </div>
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px" style="align-items:center;">
-            <button id="applyKeys" class="button-primary" disabled title="Writes each selected row's key onto its Figma layer and renames the layer to: key (namespace). Local only — nothing is sent to locize.">Apply keys to nodes</button>
-            <button id="clearKeys" disabled title="Unbinds the selected layers: removes their locize key and restores the original layer name. Nothing is deleted in locize.">Clear keys</button>
+            <span class="hint" title="Writes each selected row's key onto its Figma layer and renames the layer to: key (namespace). Local only — nothing is sent to locize."><button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button></span>
+            <span class="hint" title="Unbinds the selected layers: removes their locize key and restores the original layer name. Nothing is deleted in locize."><button id="clearKeys" disabled>Clear keys</button></span>
           </div>
           <div class="flex gap flex-wrap mt-6px">
-            <button id="uploadKeys" class="button-primary" disabled title="Sends the selected rows' text to locize as source strings, for the language picked on the Translation tab (base language by default). Only new or changed values are sent, each flagged as needing review.">Upload to locize</button>
+            <span class="hint" title="Sends the selected rows' text to locize as source strings, for the language picked on the Translation tab (base language by default). Only new or changed values are sent, each flagged as needing review."><button id="uploadKeys" class="button-primary" disabled>Upload to locize</button></span>
             <label class="checkbox" title="Asks locize to machine-translate the uploaded strings into your other languages. Available only when uploading the base language.">
               <input id="autotranslate" type="checkbox" />
               <span>Autotranslate</span>
