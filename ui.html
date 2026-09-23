@@ -1189,7 +1189,8 @@ async function showKeySuggestions(anchor, item, query, onPick){
     if(document.activeElement !== anchor) return; // focus left while fetching
   }
   const entries = suggestForItem(item, query).map(sug => ({
-    label: `${sug.namespace}.${sug.key}`,
+    // Same shape as the layer name, so the dropdown reads like the canvas.
+    label: sug.namespace ? `${sug.key} (${sug.namespace})` : sug.key,
     hint: (sug.value || '').replace(/\s+/g, ' ').slice(0, 80),
     namespace: sug.namespace,
     key: sug.key,
