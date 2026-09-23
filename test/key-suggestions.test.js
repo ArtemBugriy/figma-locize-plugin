@@ -62,9 +62,13 @@ test('the Key field dropdown', async (t) => {
   ui.scan([{ text: 'Submit', namespace: 'UnknownFeatureNs', localKey: 'Submit' }]);
   await sleep(20);
 
-  await t.test('the Suggestions column is gone', () => {
+  await t.test('the table is down to its six columns', () => {
     assert.equal(ui.rows().length, 1);
-    assert.equal(ui.cell(0, 0).parentElement.querySelectorAll('td').length, 7);
+    // select, namespace, key, text, remote text, status -- Suggestions and Orig Node
+    // Name were both dropped to buy horizontal room.
+    assert.equal(ui.cell(0, 0).parentElement.querySelectorAll('td').length, 6);
+    const headers = [...ui.document.querySelectorAll('#keysTable thead th')].map((th) => th.textContent.trim());
+    assert.equal(headers.length, 6, headers.join(' | '));
   });
 
   await t.test('opens on focus, labelled like the layer name', async () => {

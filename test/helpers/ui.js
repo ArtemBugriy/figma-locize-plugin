@@ -117,7 +117,7 @@ function loadUi(opts = {}) {
       });
     },
     rows: () => [...doc.querySelectorAll('#keysTable tbody tr')],
-    /** Columns: 0 select, 1 namespace, 2 key, 3 text, 4 remote, 5 original name, 6 status. */
+    /** Columns: 0 select, 1 namespace, 2 key, 3 text, 4 remote, 5 status. */
     cell: (row, column) => ui.rows()[row].querySelectorAll('td')[column],
     keyInput: (row) => ui.cell(row, 2).querySelector('input'),
     namespaceInput: (row) => ui.cell(row, 1).querySelector('input'),

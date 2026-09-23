@@ -216,7 +216,7 @@
       <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="panel-keys" id="tab-keys">Key Management</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-translate" id="tab-translate">Translation</button>
       <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-settings" id="tab-settings">Settings</button>
-      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);" title="Plugin version and the build date of this UI file. If this date is older than your last edit, Figma is running a stale copy.">v9 · ui 2026-09-23 13:53</span>
+      <span style="margin-left:auto; align-self:center; font-size:10px; color:var(--text-dim);" title="Plugin version and the build date of this UI file. If this date is older than your last edit, Figma is running a stale copy.">v9 · ui 2026-09-23 14:03</span>
     </div>
     <div class="tab-panels" id="tabPanels">
       <div id="panel-keys" class="tab-panel active" role="tabpanel" aria-labelledby="tab-keys">
@@ -262,7 +262,6 @@
                 <th><small>✏️</small>&nbsp;Key</th>
                 <th style="min-width: 150px;"><small>✏️</small>&nbsp;Text</th>
                 <th style="min-width: 150px;">Remote Text</th>
-                <th style="min-width: 90px;">Orig Node Name</th>
                 <th>Status</th>
               </tr>
               </thead>
@@ -416,8 +415,8 @@ const DEFAULT_API_BASE = 'https://api.locize.app';
 // project could sit behind some other locize host -- so this is a shortcut, not a
 // closed list; apiBaseProblem() still vets whatever ends up there.
 const LOCIZE_API_HOSTS = [
-  { label: DEFAULT_API_BASE, hint: 'Pro CDN \u00b7 default \u00b7 cache TTL set per version in locize' },
-  { label: 'https://api.lite.locize.app', hint: 'Standard CDN \u00b7 fixed 1 hour cache' },
+  { label: DEFAULT_API_BASE, hint: 'Pro CDN \u00b7 default' },
+  { label: 'https://api.lite.locize.app', hint: 'Standard CDN' },
 ];
 
 function filterApiHosts(query){
@@ -642,13 +641,10 @@ function renderTable(){
     const tdRemote = document.createElement('td');
     tdRemote.textContent = item.remoteText ?? '';
 
-    const tdOrig = document.createElement('td');
-    tdOrig.textContent = item.originalName || '';
-
     const tdStatus = document.createElement('td');
     tdStatus.textContent = statusText;
 
-    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
+    tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdStatus);
     rowRefs.set(item.nodeId, { tr, tdRemote, tdStatus });
     els.tableBody.appendChild(tr);
   });
