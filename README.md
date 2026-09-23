@@ -110,6 +110,13 @@ Finally, in the directory of your plugin, get the latest type definitions for th
 
   npm install --save-dev @figma/plugin-typings
 
+Run the test suite with:
+
+  npm test
+
+It boots the real ui.html in jsdom and covers the suggestion dropdown, the locize
+request layer and the Settings form.
+
 If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
 is already valid Typescript code.
 

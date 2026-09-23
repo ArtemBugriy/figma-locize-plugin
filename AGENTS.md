@@ -64,10 +64,23 @@ npm run build        # tsc → compiles code.ts → code.js (the file Figma load
 npm run watch        # tsc --watch (recommended during development)
 npm run lint         # eslint over .ts files
 npm run lint:fix     # auto-fix lint errors
+npm test             # node --test over test/**/*.test.js (jsdom)
 ```
 
 **After any edit to `code.ts` you must recompile** — Figma loads `code.js`, not `code.ts`.  
 `ui.html` is loaded directly; no build step needed for UI changes.
+
+## Tests
+`test/` runs the **real `ui.html`** inside jsdom (`test/helpers/ui.js` boots it and stubs
+the two things it talks to: `parent.postMessage` and `fetch`). Since `ui.html` has no
+build step and cannot be imported, driving it through a DOM is the only way to cover the
+frontend — and every case in there is a bug that shipped, so treat a failure as a
+regression, not a stale expectation.
+
+jsdom has no layout engine: `getBoundingClientRect()` returns zeros and
+`offsetWidth/offsetHeight` are 0. Tests that care about geometry stub them (see
+`dropdown.test.js`). Values returned from `ui.eval()` come from another realm, so
+`deepStrictEqual` on them needs `Array.from` first.
 
 ## Loading the Plugin in Figma
 Figma → Plugins → Development → Import plugin from manifest → select `manifest.json`.  
@@ -99,4 +112,5 @@ All calls go to the active project's `apiBaseUrl` (default `https://api.locize.a
 | `code.ts` | Plugin backend — node traversal, key generation, clientStorage, message handler |
 | `ui.html` | Plugin frontend — all UI, fetch calls, table rendering, suggestion engine |
 | `manifest.json` | Plugin metadata, network whitelist, editor types |
+| `test/` | jsdom tests driving the real `ui.html`; `npm test` |
 | `tsconfig.json` | Targets ES6; typeRoots includes `@figma/plugin-typings` |
