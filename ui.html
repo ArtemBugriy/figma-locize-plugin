@@ -215,7 +215,7 @@
           <div class="flex gap flex-wrap items-end">
             <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
           </div>
-          <div class="small mt-6px text-secondary">The table follows your Figma selection.</div>
+          <div class="small mt-6px text-secondary">The table follows your Figma selection. A new key is the namespace plus the layer name (not the text); layers that already have a key keep it.</div>
           <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:24px;">
             <label class="checkbox">
               <input id="ignoreHidden" type="checkbox" checked />
@@ -233,7 +233,6 @@
             <button id="suggestKeys" class="button-primary">Suggest keys</button>
             <button id="applyTopSuggestions" title="Apply first suggestion for each selected row (or all if none selected)">Apply all top suggestions</button>
           </div>
-          <div class="small my-6px">Keys are generated based on hierarchy and layer/text name.</div>
           <label class="checkbox" style="margin-bottom:8px;">
             <input id="hideUnchecked" type="checkbox" />
             <span>Show only selected rows</span>
