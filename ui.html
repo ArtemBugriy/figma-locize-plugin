@@ -195,7 +195,10 @@
   .overflow-item + .overflow-item { margin-top: 2px; }
 
   /* Project cards (Settings tab) */
-  .project-card { position: relative; border: 1px solid var(--border); border-radius: var(--radius-m); padding: 10px 12px; background: var(--bg); }
+  /* Column gap of 10px separates the rows; it is deliberately larger than the 8px
+     gap inside a row, so a label reads as belonging to the input under it rather
+     than to the row above. The remove button is absolute and stays out of flow. */
+  .project-card { position: relative; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-m); padding: 10px 12px; background: var(--bg); }
   .project-card + .project-card { margin-top: 8px; }
   .project-card .project-remove { position: absolute; top: 6px; right: 6px; min-width: 24px; padding: 2px 6px; line-height: 1; }
   .project-card .project-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
