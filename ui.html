@@ -227,7 +227,6 @@
           <div class="flex gap flex-wrap items-end">
             <label>Namespace for new keys<input id="scanNamespace" type="text" placeholder="Common" /></label>
           </div>
-          <div class="small mt-6px text-secondary">The table follows your Figma selection. A new key is the namespace plus the layer name (not the text); layers that already have a key keep it.</div>
           <div style="display:flex; align-items:center; gap:32px; margin-top:6px; margin-bottom:24px;">
             <label class="checkbox">
               <input id="ignoreHidden" type="checkbox" checked />
@@ -248,6 +247,7 @@
             <input id="hideUnchecked" type="checkbox" />
             <span>Show only selected rows</span>
           </label>
+          <div class="small text-secondary" style="margin-bottom:6px;">The table follows your Figma selection.</div>
           <div class="table-container">
             <table id="keysTable">
               <thead>
@@ -266,12 +266,12 @@
           </div>
           <p id="extraItemsInfo" class="small text-secondary my-12px" style="text-align:center; display: none;"></p>
           <div class="flex gap flex-wrap mt-6px" style="align-items:center;">
-            <button id="applyKeys" class="button-primary" disabled>Apply keys to nodes</button>
-            <button id="clearKeys" disabled title="Remove the assigned locize key from the selected nodes">Clear keys</button>
+            <button id="applyKeys" class="button-primary" disabled title="Writes each selected row's key onto its Figma layer and renames the layer to: key (namespace). Local only — nothing is sent to locize.">Apply keys to nodes</button>
+            <button id="clearKeys" disabled title="Unbinds the selected layers: removes their locize key and restores the original layer name. Nothing is deleted in locize.">Clear keys</button>
           </div>
           <div class="flex gap flex-wrap mt-6px">
-            <button id="uploadKeys" class="button-primary" disabled>Upload to locize</button>
-            <label class="checkbox" title="Available only for base language">
+            <button id="uploadKeys" class="button-primary" disabled title="Sends the selected rows' text to locize as source strings, for the language picked on the Translation tab (base language by default). Only new or changed values are sent, each flagged as needing review.">Upload to locize</button>
+            <label class="checkbox" title="Asks locize to machine-translate the uploaded strings into your other languages. Available only when uploading the base language.">
               <input id="autotranslate" type="checkbox" />
               <span>Autotranslate</span>
             </label>
@@ -470,7 +470,11 @@ function updateAutotranslateAvailability(){
     els.autotranslate.disabled = !isBase;
     const label = els.autotranslate.closest('label');
     if(label) label.style.opacity = isBase ? '' : '0.6';
-    els.autotranslate.title = isBase ? '' : 'Works only for base language';
+    // No title on the input means the browser falls back to the label's, which explains
+    // what the option does. title="" would suppress that, so remove the attribute
+    // instead and only set one to say why the option is unavailable right now.
+    if(isBase) els.autotranslate.removeAttribute('title');
+    else els.autotranslate.title = 'Unavailable: you are viewing ' + lang + ', not the base language (' + (s.baseLanguage || 'en') + ').';
   }
 }
 
