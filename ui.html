@@ -439,8 +439,14 @@ function updateAutotranslateAvailability(){
   }
 }
 
+// nodeId -> the row parts a sync-status refresh may touch. Rebuilt by every full
+// render; rows that aren't in the DOM (filtered out, or past MAX_TABLE_ROWS) are
+// simply absent, and updates for them are skipped.
+const rowRefs = new Map();
+
 function renderTable(){
   els.tableBody.innerHTML = '';
+  rowRefs.clear();
   const itemsToRender = hideUnchecked ? currentItems.filter(i => i.selected !== false) : currentItems;
   const limitedItems = itemsToRender.slice(0, MAX_TABLE_ROWS);
   const extraCount = Math.max(0, itemsToRender.length - limitedItems.length);
@@ -599,6 +605,7 @@ function renderTable(){
     tdStatus.textContent = statusText;
 
     tr.appendChild(tdSel); tr.appendChild(tdNs); tr.appendChild(tdKey); tr.appendChild(tdText); tr.appendChild(tdRemote); tr.appendChild(tdOrig); tr.appendChild(tdStatus);
+    rowRefs.set(item.nodeId, { tr, tdRemote, tdStatus });
     els.tableBody.appendChild(tr);
   });
   // simplified: toggle paragraph under the table instead of adding a tbody row
@@ -619,6 +626,22 @@ function itemStatusText(item) {
   if (item.synced === true) return 'synced';
   if (item.synced === false) return 'unsynced';
   return '—';
+}
+
+// A sync-status refresh only ever changes the row's colour, its Remote Text and its
+// Status cell. Re-rendering the whole table for that would rebuild every input, which
+// steals focus and discards whatever is being typed in another row -- and the refresh
+// lands hundreds of milliseconds after the blur that triggered it, so the row being
+// destroyed is rarely the one that was edited.
+function applyStatusToRows(items){
+  for(const item of items){
+    const refs = rowRefs.get(item.nodeId);
+    if(!refs) continue;
+    const statusText = itemStatusText(item);
+    refs.tr.className = statusText === '—' ? '' : statusText;
+    refs.tdRemote.textContent = item.remoteText ?? '';
+    refs.tdStatus.textContent = statusText;
+  }
 }
 
 // Read-only table for the Translation tab: only keyed nodes in the current selection.
@@ -728,9 +751,10 @@ function scheduleStatusRefresh(){
 async function refreshSyncStatus(){
   // Key Management: status reflects whether the key exists in the project (base/source
   // language) — a key with no full namespace+name match is "new" (missing/red).
-  return refreshSyncStatusFor(currentItems, renderTable, collectSettings().baseLanguage);
+  return refreshSyncStatusFor(currentItems, applyStatusToRows, collectSettings().baseLanguage);
 }
 
+// renderFn is called with the items whose status was just recomputed.
 async function refreshSyncStatusFor(items, renderFn, compareLang){
   const seq = ++syncStatusSeq;
   const s = collectSettings();
@@ -738,7 +762,7 @@ async function refreshSyncStatusFor(items, renderFn, compareLang){
   const baseLang = s.baseLanguage || 'en';
   const lang = compareLang || currentLanguage || baseLang;
   const nsSet = Array.from(new Set(items.map(i => (i.namespace||'').trim()).filter(Boolean)));
-  if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(); return; }
+  if(!nsSet.length){ items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; }); renderFn(items); return; }
   try {
     // Ensure cache for required namespaces for the compared and base languages
     if(!remoteCache[lang]) remoteCache[lang] = {};
@@ -809,7 +833,7 @@ async function refreshSyncStatusFor(items, renderFn, compareLang){
     items.forEach(i=>{ i.synced=undefined; i.remoteText=undefined; i.status=undefined; });
   }
   pruneRemoteCache();
-  renderFn();
+  renderFn(items);
 }
 
 // Settings load
