@@ -81,6 +81,7 @@ Reload plugin after each `code.js` rebuild (Cmd+Option+P or right-click → Run)
 - **Scope:** when `figma.currentPage.selection.length === 0`, operations fall back to `figma.currentPage.children` (entire page) — except `postScanResult()`, which reports `No selection` and empties the table.
 - **Selection-driven table:** the Key Management table is rebuilt from the current selection, so a re-scan discards unapplied row edits. Anything that triggers one goes through `requestScan()`; `lastScannedNamespace` suppresses redundant re-scans.
 - **Table row cap:** UI renders max `MAX_TABLE_ROWS = 100` rows; overflow shown as `+N items`.
+- **Key suggestions:** the Key cell owns them. `showKeySuggestions()` fills the shared dropdown; `suggestForItem()` ranks one row at a time — fuzzy against the node text when nothing is typed, substring containment (`containmentScore`) once the user types, because the fuzzy scorer divides by candidate length and sinks short queries. The pool is warmed by `ensureSuggestionPoolReady()`.
 - **API base URL:** per-project setting (`apiBaseUrl`), defaulting to `https://api.locize.app`; the lite tier is `https://api.lite.locize.app`. `ui.html` builds every request from it — never hardcode the host.
 - **Network scope:** `manifest.json` restricts `networkAccess.allowedDomains` to `https://api.locize.app` and `https://*.locize.app`. A base URL outside that wildcard is blocked by Figma, so the UI warns before saving.
 

@@ -7,8 +7,7 @@ Effortlessly bridge your Figma designs with your locize translation project. Sca
 - The Key Management table follows the Figma selection automatically — select layers and their TEXT nodes appear, no scan button to press
 - Inline editing of layer text with live sync back to the Figma node (fonts auto-loaded)
 - Persistent per-node selection state (unchecked items remembered across sessions) + “Hide unchecked” filter
-- Fuzzy key suggestion engine: suggests existing keys from chosen namespaces (configurable list) using normalized text similarity
-- One-click “Apply all top suggestions” to rapidly re-use existing keys
+- Key autocomplete: editing a row's Key field offers existing keys from the chosen namespaces — ranked by the node's text on focus, filtered by what you type; picking one fills in both the namespace and the key
 - Sync status coloring (synced / unsynced / missing) comparing local text vs remote translations per language
 - Remote translation application: switch language and apply translations to all keyed nodes
 - Upload selected base language strings to locize with progress indicator (batched, cached)
