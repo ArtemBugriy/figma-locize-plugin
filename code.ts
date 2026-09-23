@@ -317,7 +317,10 @@ async function postScanResult(namespace: string, ignoreHidden: boolean, mergeSam
 
 // --- Plugin init ---
 
-const DEFAULT_UI_WIDTH = 740;
+// Wider than the body so the table is not squeezed: body is max-width:100% and
+// centred, so a window narrower than it shrinks the body and the table starts
+// scrolling horizontally.
+const DEFAULT_UI_WIDTH = 800;
 const DEFAULT_UI_HEIGHT = 740;
 
 (async () => {
